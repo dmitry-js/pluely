@@ -147,6 +147,37 @@ pub fn move_window(app: tauri::AppHandle, direction: String, step: i32) -> Resul
     Ok(())
 }
 
+#[tauri::command]
+pub fn move_window_by(app: tauri::AppHandle, dx: i32, dy: i32) -> Result<(), String> {
+    move_main_window_by(&app, dx, dy)
+}
+
+pub(crate) fn move_main_window_by<R: Runtime>(
+    app: &AppHandle<R>,
+    dx: i32,
+    dy: i32,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    let current_pos = window
+        .outer_position()
+        .map_err(|e| format!("Failed to get window position: {}", e))?;
+
+    let new_x = current_pos.x.saturating_add(dx).max(0);
+    let new_y = current_pos.y.saturating_add(dy).max(0);
+
+    window
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: new_x,
+            y: new_y,
+        }))
+        .map_err(|e| format!("Failed to set window position: {}", e))?;
+
+    Ok(())
+}
+
 pub fn create_dashboard_window<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<WebviewWindow<R>, tauri::Error> {
