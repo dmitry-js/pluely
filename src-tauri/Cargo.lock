@@ -4132,6 +4132,7 @@ dependencies = [
  "cpal",
  "dotenv",
  "futures-util",
+ "gtk",
  "hound",
  "image",
  "libpulse-binding",

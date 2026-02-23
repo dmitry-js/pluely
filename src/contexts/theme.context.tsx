@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { STORAGE_KEYS } from "@/config/";
 
 type Theme = "dark" | "light" | "system";
@@ -89,20 +90,26 @@ export function ThemeProvider({
     };
   }, [theme]);
 
-  // Apply transparency globally
+  // Apply native window opacity from transparency setting
   useEffect(() => {
     const root = window.document.documentElement;
-    const opacity = (100 - transparency) / 100;
+    root.style.setProperty("--opacity", "1");
+    root.style.setProperty("--backdrop-blur", "none");
 
-    // Apply opacity to CSS variables
-    root.style.setProperty("--opacity", opacity.toString());
+    const normalized = Math.max(0, Math.min(100, transparency));
+    const opacity = (100 - normalized) / 100;
 
-    // Apply backdrop filter when transparency is active
-    if (transparency > 0) {
-      root.style.setProperty("--backdrop-blur", "blur(12px)");
-    } else {
-      root.style.setProperty("--backdrop-blur", "none");
-    }
+    const timeoutId = window.setTimeout(() => {
+      if (!("__TAURI_INTERNALS__" in window)) {
+        return;
+      }
+
+      invoke("set_window_opacity", { opacity }).catch((error) => {
+        console.error("Failed to set window opacity:", error);
+      });
+    }, 75);
+
+    return () => window.clearTimeout(timeoutId);
   }, [transparency]);
 
   const onSetTransparency = (transparency: number) => {

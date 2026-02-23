@@ -1,6 +1,10 @@
 #[cfg(target_os = "macos")]
 use tauri::LogicalPosition;
+#[cfg(target_os = "linux")]
+use gtk::prelude::WidgetExt;
 use tauri::{App, AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri_nspanel::WebviewWindowExt;
 
 // The offset from the top of the screen to the window
 const TOP_OFFSET: i32 = 54;
@@ -81,6 +85,65 @@ pub fn set_window_height(window: tauri::WebviewWindow, height: u32) -> Result<()
         .map_err(|e| format!("Failed to resize window: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    let clamped = opacity.clamp(0.4, 1.0);
+
+    apply_window_opacity(&window, clamped)
+}
+
+#[cfg(target_os = "linux")]
+fn apply_window_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let window_for_main_thread = window.clone();
+
+    window
+        .run_on_main_thread(move || {
+            let result = window_for_main_thread
+                .gtk_window()
+                .map_err(|e| format!("Failed to get GTK window: {}", e))
+                .map(|gtk_window| gtk_window.set_opacity(opacity));
+
+            let _ = tx.send(result);
+        })
+        .map_err(|e| format!("Failed to schedule opacity update: {}", e))?;
+
+    rx.recv()
+        .map_err(|e| format!("Failed to apply window opacity: {}", e))?
+}
+
+#[cfg(target_os = "macos")]
+fn apply_window_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let window_for_main_thread = window.clone();
+
+    window
+        .run_on_main_thread(move || {
+            let result = window_for_main_thread
+                .to_panel()
+                .map_err(|e| format!("Failed to access main panel: {}", e))
+                .map(|panel| panel.set_alpha_value(opacity));
+
+            let _ = tx.send(result);
+        })
+        .map_err(|e| format!("Failed to schedule opacity update: {}", e))?;
+
+    rx.recv()
+        .map_err(|e| format!("Failed to apply window opacity: {}", e))?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn apply_window_opacity<R: Runtime>(
+    _window: &WebviewWindow<R>,
+    _opacity: f64,
+) -> Result<(), String> {
+    Err("Window opacity is not supported on this platform".to_string())
 }
 
 #[tauri::command]

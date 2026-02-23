@@ -122,17 +122,15 @@
   }
 }
 
-/* Apply global transparency */
+/* Keep UI surfaces stable; window transparency is handled natively */
 [data-slot="card"] {
-  background-color: rgb(from var(--card) r g b / var(--opacity, 1)) !important;
-  backdrop-filter: var(--backdrop-blur, none);
+  background-color: rgb(from var(--card) r g b / 0.95) !important;
+  backdrop-filter: none;
 }
 
 [data-slot="popover-content"] {
-  background-color: rgb(
-    from var(--popover) r g b / var(--opacity, 1)
-  ) !important;
-  backdrop-filter: var(--backdrop-blur, none);
+  background-color: rgb(from var(--popover) r g b / 0.95) !important;
+  backdrop-filter: none;
 }
 
 * {
