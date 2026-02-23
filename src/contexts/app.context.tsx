@@ -13,7 +13,6 @@ import {
   updateAlwaysOnTop,
   updateAutostart,
   CustomizableState,
-  DEFAULT_CUSTOMIZABLE_STATE,
   CursorType,
   updateCursorType,
 } from "@/lib/storage";
@@ -128,8 +127,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
 
   // Unified Customizable State
-  const [customizable, setCustomizable] = useState<CustomizableState>(
-    DEFAULT_CUSTOMIZABLE_STATE
+  const [customizable, setCustomizable] = useState<CustomizableState>(() =>
+    getCustomizableState()
   );
   const [hasActiveLicense, setHasActiveLicense] = useState<boolean>(true);
   const [supportsImages, setSupportsImagesState] = useState<boolean>(() => {

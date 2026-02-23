@@ -52,6 +52,28 @@ impl LicenseState {
     }
 }
 
+pub struct AlwaysOnTopState {
+    enabled: AtomicBool,
+}
+
+impl Default for AlwaysOnTopState {
+    fn default() -> Self {
+        Self {
+            enabled: AtomicBool::new(false),
+        }
+    }
+}
+
+impl AlwaysOnTopState {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+    }
+}
+
 pub(crate) type MoveWindowTask = Arc<AtomicBool>;
 
 pub(crate) struct MoveWindowState {
@@ -271,15 +293,34 @@ pub fn stop_all_move_windows<R: Runtime>(app: &AppHandle<R>) {
 
 /// Handle app toggle (hide/show) with input focus and app icon management
 fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
+    eprintln!("toggle_window shortcut fired");
+
     // Get the main window
     let Some(window) = app.get_webview_window("main") else {
+        eprintln!("toggle_window: main window not found");
         return;
     };
+
+    let always_on_top_enabled = {
+        let state = app.state::<AlwaysOnTopState>();
+        state.is_enabled()
+    };
+
+    eprintln!(
+        "toggle_window: always_on_top enabled = {}",
+        always_on_top_enabled
+    );
 
     #[cfg(target_os = "windows")]
     {
         let state = app.state::<WindowVisibility>();
-        let mut is_hidden = state.is_hidden.lock().unwrap();
+        let mut is_hidden = match state.is_hidden.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                eprintln!("toggle_window: visibility state mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         *is_hidden = !*is_hidden;
 
         if let Err(e) = window.emit("toggle-window-visibility", *is_hidden) {
@@ -303,17 +344,20 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(not(target_os = "windows"))]
     match window.is_visible() {
         Ok(true) => {
-            #[cfg(target_os = "macos")]
-            {
-                let panel = app.get_webview_window("main").unwrap();
-                let _ = panel.hide();
-            }
+            eprintln!("toggle_window: current visibility = true");
             // Window is visible, hide it and handle app icon based on user settings
             if let Err(e) = window.hide() {
                 eprintln!("Failed to hide window: {}", e);
             }
         }
         Ok(false) => {
+            eprintln!("toggle_window: current visibility = false");
+            if let Ok(true) = window.is_minimized() {
+                if let Err(e) = window.unminimize() {
+                    eprintln!("toggle_window: failed to unminimize window: {}", e);
+                }
+            }
+
             // Window is hidden, show it and handle app icon based on user settings
             if let Err(e) = window.show() {
                 eprintln!("Failed to show window: {}", e);
@@ -325,14 +369,26 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
 
             #[cfg(target_os = "macos")]
             {
-                let panel = app.get_webview_panel("main").unwrap();
-                panel.show();
+                match app.get_webview_panel("main") {
+                    Ok(panel) => panel.show(),
+                    Err(_) => eprintln!("toggle_window: failed to get macOS panel"),
+                }
             }
+
+            if always_on_top_enabled {
+                match window.set_always_on_top(true) {
+                    Ok(_) => eprintln!("toggle_window: re-applied always-on-top successfully"),
+                    Err(e) => eprintln!("toggle_window: failed to re-apply always-on-top: {}", e),
+                }
+            }
+
             // Emit event to focus text input
-            window.emit("focus-text-input", json!({})).unwrap();
+            if let Err(e) = window.emit("focus-text-input", json!({})) {
+                eprintln!("Failed to emit focus-text-input event: {}", e);
+            }
         }
         Err(e) => {
-            eprintln!("Failed to check window visibility: {}", e);
+            eprintln!("toggle_window: failed to check window visibility: {}", e);
         }
     }
 }
@@ -653,6 +709,10 @@ pub fn set_always_on_top<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result
         window
             .set_always_on_top(enabled)
             .map_err(|e| format!("Failed to set always on top: {}", e))?;
+
+        let state = app.state::<AlwaysOnTopState>();
+        state.set_enabled(enabled);
+        eprintln!("set_always_on_top: enabled={}", enabled);
     } else {
         return Err("Main window not found".to_string());
     }

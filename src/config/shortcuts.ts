@@ -18,7 +18,7 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
     defaultKey: {
       macos: "cmd+backslash",
       windows: "ctrl+backslash",
-      linux: "ctrl+backslash",
+      linux: "Ctrl+Shift+`",
     },
   },
   {
