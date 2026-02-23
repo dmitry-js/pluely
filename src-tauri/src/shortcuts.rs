@@ -78,7 +78,7 @@ pub struct ShortcutsConfig {
     pub bindings: HashMap<String, ShortcutBinding>,
 }
 
-const FIXED_MOVE_STEP: i32 = 20;
+const FIXED_MOVE_STEP: i32 = 50;
 
 const FIXED_MOVE_SHORTCUTS: [(&str, &str, i32, i32); 4] = [
     (
