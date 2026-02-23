@@ -64,6 +64,42 @@ impl Default for AlwaysOnTopState {
     }
 }
 
+pub struct WindowPositionState {
+    position: Mutex<Option<(i32, i32)>>,
+}
+
+impl Default for WindowPositionState {
+    fn default() -> Self {
+        Self {
+            position: Mutex::new(None),
+        }
+    }
+}
+
+impl WindowPositionState {
+    pub fn set(&self, position: (i32, i32)) {
+        let mut guard = match self.position.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                eprintln!("window_position: mutex poisoned while setting, recovering");
+                poisoned.into_inner()
+            }
+        };
+        *guard = Some(position);
+    }
+
+    pub fn get(&self) -> Option<(i32, i32)> {
+        let guard = match self.position.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                eprintln!("window_position: mutex poisoned while getting, recovering");
+                poisoned.into_inner()
+            }
+        };
+        *guard
+    }
+}
+
 impl AlwaysOnTopState {
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
@@ -305,6 +341,7 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
         let state = app.state::<AlwaysOnTopState>();
         state.is_enabled()
     };
+    let window_position_state = app.state::<WindowPositionState>();
 
     eprintln!(
         "toggle_window: always_on_top enabled = {}",
@@ -327,10 +364,41 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
             eprintln!("Failed to emit toggle-window-visibility event: {}", e);
         }
 
+        if *is_hidden {
+            match window.outer_position() {
+                Ok(position) => {
+                    window_position_state.set((position.x, position.y));
+                    eprintln!(
+                        "toggle_window: stored position before hide = ({}, {})",
+                        position.x, position.y
+                    );
+                }
+                Err(e) => eprintln!("toggle_window: failed to get position before hide: {}", e),
+            }
+        }
+
         if !*is_hidden {
             if let Err(e) = window.show() {
                 eprintln!("Failed to show window: {}", e);
             }
+
+            if let Some((x, y)) = window_position_state.get() {
+                match window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x,
+                    y,
+                })) {
+                    Ok(_) => eprintln!("toggle_window: restored position after show = ({}, {})", x, y),
+                    Err(e) => eprintln!("toggle_window: failed to restore position: {}", e),
+                }
+            }
+
+            if always_on_top_enabled {
+                match window.set_always_on_top(true) {
+                    Ok(_) => eprintln!("toggle_window: re-applied always-on-top successfully"),
+                    Err(e) => eprintln!("toggle_window: failed to re-apply always-on-top: {}", e),
+                }
+            }
+
             if let Err(e) = window.set_focus() {
                 eprintln!("Failed to focus window: {}", e);
             }
@@ -345,6 +413,16 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
     match window.is_visible() {
         Ok(true) => {
             eprintln!("toggle_window: current visibility = true");
+            match window.outer_position() {
+                Ok(position) => {
+                    window_position_state.set((position.x, position.y));
+                    eprintln!(
+                        "toggle_window: stored position before hide = ({}, {})",
+                        position.x, position.y
+                    );
+                }
+                Err(e) => eprintln!("toggle_window: failed to get position before hide: {}", e),
+            }
             // Window is visible, hide it and handle app icon based on user settings
             if let Err(e) = window.hide() {
                 eprintln!("Failed to hide window: {}", e);
@@ -363,8 +441,14 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                 eprintln!("Failed to show window: {}", e);
             }
 
-            if let Err(e) = window.set_focus() {
-                eprintln!("Failed to focus window: {}", e);
+            if let Some((x, y)) = window_position_state.get() {
+                match window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x,
+                    y,
+                })) {
+                    Ok(_) => eprintln!("toggle_window: restored position after show = ({}, {})", x, y),
+                    Err(e) => eprintln!("toggle_window: failed to restore position: {}", e),
+                }
             }
 
             #[cfg(target_os = "macos")]
@@ -380,6 +464,10 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                     Ok(_) => eprintln!("toggle_window: re-applied always-on-top successfully"),
                     Err(e) => eprintln!("toggle_window: failed to re-apply always-on-top: {}", e),
                 }
+            }
+
+            if let Err(e) = window.set_focus() {
+                eprintln!("Failed to focus window: {}", e);
             }
 
             // Emit event to focus text input
