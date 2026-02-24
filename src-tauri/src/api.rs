@@ -11,6 +11,18 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_machine_uid::MachineUidExt;
 
 const OPENAI_USER_HISTORY_LIMIT: usize = 3;
+const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 150;
+const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
+const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
+
+fn normalize_openai_response_length(value: Option<&str>) -> String {
+    match value.unwrap_or("short").trim().to_lowercase().as_str() {
+        "short" => "short".to_string(),
+        "medium" => "medium".to_string(),
+        "auto" => "auto".to_string(),
+        _ => "short".to_string(),
+    }
+}
 
 fn get_app_endpoint() -> Result<String, String> {
     if let Ok(endpoint) = env::var("APP_ENDPOINT") {
@@ -686,6 +698,7 @@ pub async fn chat_stream_response(
     history: Option<String>,
     provider: Option<String>,
     model: Option<String>,
+    response_length: Option<String>,
 ) -> Result<String, String> {
     let requested_provider = provider.clone().map(|value| value.to_lowercase());
     let requested_model = model.clone();
@@ -852,9 +865,22 @@ pub async fn chat_stream_response(
     } else {
         api_config.url.clone()
     };
+    let openai_response_length = if is_openai_responses {
+        Some(normalize_openai_response_length(response_length.as_deref()))
+    } else {
+        None
+    };
 
     // Build request body
     let mut request_body = if is_openai_responses {
+        let selected_length = openai_response_length.as_deref().unwrap_or("short");
+        let (max_output_tokens, reasoning_effort): (Option<i64>, &str) = match selected_length {
+            "short" => (Some(OPENAI_SHORT_MAX_OUTPUT_TOKENS), "minimal"),
+            "medium" => (Some(OPENAI_MEDIUM_MAX_OUTPUT_TOKENS), "medium"),
+            "auto" => (Some(OPENAI_AUTO_MAX_OUTPUT_TOKENS), "medium"),
+            _ => (Some(OPENAI_SHORT_MAX_OUTPUT_TOKENS), "minimal"),
+        };
+
         let mut body = serde_json::json!({
             "model": api_config.model,
             "input": to_openai_responses_input(&conversation_messages),
@@ -869,6 +895,19 @@ pub async fn chat_stream_response(
                         serde_json::Value::String(sys_prompt.to_string()),
                     );
                 }
+            }
+        }
+
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "reasoning".to_string(),
+                serde_json::json!({ "effort": reasoning_effort }),
+            );
+            if let Some(token_limit) = max_output_tokens {
+                obj.insert(
+                    "max_output_tokens".to_string(),
+                    serde_json::json!(token_limit),
+                );
             }
         }
 
@@ -894,18 +933,38 @@ pub async fn chat_stream_response(
 
     // Merge extra body parameters from API config
     if let Some(extra_obj) = extra_body.as_object_mut() {
+        let extra_has_openai_max_output_tokens = extra_obj.contains_key("max_output_tokens");
         if let Some(req_obj) = request_body.as_object_mut() {
             for (key, value) in extra_obj.iter() {
                 if is_openai_responses && key == "messages" {
                     continue;
                 }
-                if is_openai_responses && key == "max_tokens" && !req_obj.contains_key("max_output_tokens") {
-                    req_obj.insert("max_output_tokens".to_string(), value.clone());
+                if is_openai_responses && key == "max_tokens" {
+                    if !extra_has_openai_max_output_tokens {
+                        req_obj.insert("max_output_tokens".to_string(), value.clone());
+                    }
                     continue;
                 }
                 req_obj.insert(key.clone(), value.clone());
             }
         }
+    }
+
+    if is_openai_responses {
+        let selected_length = openai_response_length.as_deref().unwrap_or("short");
+        let max_output_tokens_log = request_body
+            .get("max_output_tokens")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let reasoning_effort_log = request_body
+            .get("reasoning")
+            .and_then(|value| value.get("effort"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("none");
+        eprintln!(
+            "chat_stream_response openai response controls: response_length={}, max_output_tokens={}, reasoning_effort={}",
+            selected_length, max_output_tokens_log, reasoning_effort_log
+        );
     }
 
     // Make HTTP request to the configured endpoint with streaming
@@ -949,8 +1008,6 @@ pub async fn chat_stream_response(
             .text()
             .await
             .unwrap_or_else(|_| "Unknown server error".to_string());
-
-            eprintln!("OPENAI ERROR TEXT: {}", error_text); // log
 
         let mut sources = vec![error_text.clone(), status.to_string()];
 

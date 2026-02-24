@@ -15,6 +15,15 @@ import { CHUNK_POLL_INTERVAL_MS } from "../chat-constants";
 import { getResponseSettings, RESPONSE_LENGTHS, LANGUAGES } from "@/lib";
 import { MARKDOWN_FORMATTING_INSTRUCTIONS } from "@/config/constants";
 
+type ResponseLengthId = "short" | "medium" | "auto";
+
+function normalizeResponseLength(value?: string): ResponseLengthId {
+  if (value === "short" || value === "medium" || value === "auto") {
+    return value;
+  }
+  return "short";
+}
+
 function buildEnhancedSystemPrompt(baseSystemPrompt?: string): string {
   const responseSettings = getResponseSettings();
   const prompts: string[] = [];
@@ -51,6 +60,7 @@ async function* fetchBackendAIResponse(params: {
   history?: Message[];
   provider?: string;
   model?: string;
+  responseLength?: ResponseLengthId;
   signal?: AbortSignal;
 }): AsyncIterable<string> {
   try {
@@ -61,6 +71,7 @@ async function* fetchBackendAIResponse(params: {
       history = [],
       provider,
       model,
+      responseLength,
       signal,
     } = params;
 
@@ -115,6 +126,7 @@ async function* fetchBackendAIResponse(params: {
         history: historyString,
         provider,
         model,
+        responseLength,
       });
 
       // Yield chunks as they come in
@@ -196,6 +208,9 @@ export async function* fetchAIResponse(params: {
     }
 
     const enhancedSystemPrompt = buildEnhancedSystemPrompt(systemPrompt);
+    const responseLength = normalizeResponseLength(
+      getResponseSettings().responseLength
+    );
 
     // Check if we should use Pluely API instead
     const usePluelyAPI = await shouldUsePluelyAPI();
@@ -205,6 +220,7 @@ export async function* fetchAIResponse(params: {
         userMessage,
         imagesBase64,
         history,
+        responseLength,
         signal,
       });
       return;
@@ -231,6 +247,7 @@ export async function* fetchAIResponse(params: {
         history,
         provider: "openai",
         model: selectedModel,
+        responseLength,
         signal,
       });
       return;
