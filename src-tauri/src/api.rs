@@ -10,6 +10,8 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_machine_uid::MachineUidExt;
 
+const OPENAI_USER_HISTORY_LIMIT: usize = 3;
+
 fn get_app_endpoint() -> Result<String, String> {
     if let Ok(endpoint) = env::var("APP_ENDPOINT") {
         return Ok(endpoint);
@@ -755,13 +757,38 @@ pub async fn chat_stream_response(
         serde_json::json!({})
     };
 
+    let is_openai_responses =
+        is_openai_chat_completions_endpoint(&api_config.url, effective_provider.as_deref());
+
     // Build conversation messages (history + current user message)
     let mut conversation_messages: Vec<serde_json::Value> = Vec::new();
+    let mut included_history_count = 0usize;
 
     // Add history if provided
     if let Some(history_str) = history {
         if let Ok(history_messages) = serde_json::from_str::<Vec<serde_json::Value>>(&history_str) {
-            conversation_messages.extend(history_messages);
+            if is_openai_responses {
+                let mut user_history: Vec<serde_json::Value> = history_messages
+                    .into_iter()
+                    .filter(|message| {
+                        message
+                            .get("role")
+                            .and_then(|role| role.as_str())
+                            == Some("user")
+                    })
+                    .collect();
+
+                if user_history.len() > OPENAI_USER_HISTORY_LIMIT {
+                    let split_at = user_history.len() - OPENAI_USER_HISTORY_LIMIT;
+                    user_history = user_history.split_off(split_at);
+                }
+
+                included_history_count = user_history.len();
+                conversation_messages.extend(user_history);
+            } else {
+                included_history_count = history_messages.len();
+                conversation_messages.extend(history_messages);
+            }
         }
     }
 
@@ -809,8 +836,15 @@ pub async fn chat_stream_response(
         "content": user_content
     }));
 
-    let is_openai_responses =
-        is_openai_chat_completions_endpoint(&api_config.url, effective_provider.as_deref());
+    if is_openai_responses {
+        eprintln!(
+            "chat_stream_response openai history: included_user_history={}, limit={}, total_input_messages={}",
+            included_history_count,
+            OPENAI_USER_HISTORY_LIMIT,
+            conversation_messages.len()
+        );
+    }
+
     let request_url = if is_openai_responses {
         api_config
             .url
@@ -878,6 +912,7 @@ pub async fn chat_stream_response(
     let request_started_at = Instant::now();
     let client = reqwest::Client::new();
     let error_rules = api_config.errors.clone().unwrap_or_default();
+
     let response = match client
         .post(&request_url)
         .header("Content-Type", "application/json")
@@ -914,6 +949,8 @@ pub async fn chat_stream_response(
             .text()
             .await
             .unwrap_or_else(|_| "Unknown server error".to_string());
+
+            eprintln!("OPENAI ERROR TEXT: {}", error_text); // log
 
         let mut sources = vec![error_text.clone(), status.to_string()];
 
