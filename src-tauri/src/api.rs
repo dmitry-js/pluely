@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_machine_uid::MachineUidExt;
 
@@ -49,6 +50,34 @@ struct SecureStorage {
     license_key: Option<String>,
     instance_id: Option<String>,
     selected_pluely_model: Option<String>,
+    openai_api_key: Option<String>,
+}
+
+fn read_secure_storage(app: &AppHandle) -> Result<SecureStorage, String> {
+    let storage_path = get_secure_storage_path(app)?;
+    if !storage_path.exists() {
+        return Ok(SecureStorage::default());
+    }
+
+    let content = fs::read_to_string(&storage_path)
+        .map_err(|e| format!("Failed to read storage file: {}", e))?;
+
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse storage file: {}", e))
+}
+
+fn write_secure_storage(app: &AppHandle, storage: &SecureStorage) -> Result<(), String> {
+    let storage_path = get_secure_storage_path(app)?;
+    let content = serde_json::to_string(storage)
+        .map_err(|e| format!("Failed to serialize storage: {}", e))?;
+    fs::write(&storage_path, content).map_err(|e| format!("Failed to write storage file: {}", e))
+}
+
+fn get_openai_api_key_from_storage(app: &AppHandle) -> Result<Option<String>, String> {
+    let storage = read_secure_storage(app)?;
+    Ok(storage
+        .openai_api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
 }
 
 pub async fn get_stored_credentials(
@@ -78,6 +107,30 @@ pub async fn get_stored_credentials(
         .and_then(|json_str| serde_json::from_str(&json_str).ok());
 
     Ok((license_key, instance_id, selected_model))
+}
+
+#[tauri::command]
+pub async fn set_openai_api_key(app: AppHandle, key: String) -> Result<(), String> {
+    let trimmed = key.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("OpenAI API key cannot be empty.".to_string());
+    }
+
+    let mut storage = read_secure_storage(&app)?;
+    storage.openai_api_key = Some(trimmed);
+    write_secure_storage(&app, &storage)
+}
+
+#[tauri::command]
+pub async fn clear_openai_api_key(app: AppHandle) -> Result<(), String> {
+    let mut storage = read_secure_storage(&app)?;
+    storage.openai_api_key = None;
+    write_secure_storage(&app, &storage)
+}
+
+#[tauri::command]
+pub async fn get_openai_api_key_status(app: AppHandle) -> bool {
+    get_openai_api_key_from_storage(&app).ok().flatten().is_some()
 }
 
 // Audio API Structs
@@ -477,6 +530,151 @@ async fn perform_user_audio_transcription(
     Ok(body_text)
 }
 
+fn is_openai_chat_completions_endpoint(url: &str, provider: Option<&str>) -> bool {
+    if provider == Some("openai") && url.contains("/v1/chat/completions") {
+        return true;
+    }
+
+    Url::parse(url)
+        .ok()
+        .map(|parsed| parsed.host_str() == Some("api.openai.com") && parsed.path() == "/v1/chat/completions")
+        .unwrap_or(false)
+}
+
+fn is_openai_endpoint(url: &str) -> bool {
+    Url::parse(url)
+        .ok()
+        .map(|parsed| parsed.host_str() == Some("api.openai.com"))
+        .unwrap_or(false)
+}
+
+fn to_responses_content(content: &serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::String(text) => serde_json::json!([{
+            "type": "input_text",
+            "text": text
+        }]),
+        serde_json::Value::Array(items) => {
+            let mut normalized: Vec<serde_json::Value> = Vec::new();
+
+            for item in items {
+                let item_type = item.get("type").and_then(|value| value.as_str());
+
+                match item_type {
+                    Some("text") | Some("input_text") => {
+                        if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
+                            normalized.push(serde_json::json!({
+                                "type": "input_text",
+                                "text": text
+                            }));
+                        }
+                    }
+                    Some("image_url") | Some("input_image") => {
+                        let image_url = item
+                            .get("image_url")
+                            .and_then(|value| value.as_str())
+                            .or_else(|| {
+                                item.get("image_url")
+                                    .and_then(|value| value.get("url"))
+                                    .and_then(|value| value.as_str())
+                            });
+
+                        if let Some(url) = image_url {
+                            normalized.push(serde_json::json!({
+                                "type": "input_image",
+                                "image_url": url
+                            }));
+                        }
+                    }
+                    _ => {
+                        if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
+                            normalized.push(serde_json::json!({
+                                "type": "input_text",
+                                "text": text
+                            }));
+                        }
+                    }
+                }
+            }
+
+            if normalized.is_empty() {
+                serde_json::json!([])
+            } else {
+                serde_json::Value::Array(normalized)
+            }
+        }
+        _ => serde_json::json!([]),
+    }
+}
+
+fn to_openai_responses_input(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut input: Vec<serde_json::Value> = Vec::new();
+
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(|value| value.as_str())
+            .unwrap_or("user");
+
+        if role == "system" {
+            continue;
+        }
+
+        let content = message.get("content").cloned().unwrap_or(serde_json::json!(""));
+        let mapped_content = to_responses_content(&content);
+
+        input.push(serde_json::json!({
+            "role": role,
+            "content": mapped_content
+        }));
+    }
+
+    input
+}
+
+fn extract_stream_text_delta(parsed: &serde_json::Value) -> Option<String> {
+    if let Some(choices) = parsed.get("choices").and_then(|value| value.as_array()) {
+        if let Some(first_choice) = choices.first() {
+            if let Some(delta) = first_choice.get("delta") {
+                if let Some(content) = delta.get("content").and_then(|value| value.as_str()) {
+                    return Some(content.to_string());
+                }
+            }
+        }
+    }
+
+    if parsed
+        .get("type")
+        .and_then(|value| value.as_str())
+        == Some("response.output_text.delta")
+    {
+        if let Some(delta) = parsed.get("delta").and_then(|value| value.as_str()) {
+            return Some(delta.to_string());
+        }
+    }
+
+    None
+}
+
+fn extract_usage_metrics(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    if let Some(usage) = parsed.get("usage") {
+        if !usage.is_null() {
+            return Some(usage.clone());
+        }
+    }
+
+    if let Some(usage) = parsed
+        .get("response")
+        .and_then(|response| response.get("usage"))
+    {
+        if !usage.is_null() {
+            return Some(usage.clone());
+        }
+    }
+
+    None
+}
+
 #[tauri::command]
 pub async fn chat_stream_response(
     app: AppHandle,
@@ -484,15 +682,71 @@ pub async fn chat_stream_response(
     system_prompt: Option<String>,
     image_base64: Option<serde_json::Value>,
     history: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
 ) -> Result<String, String> {
-    // Get stored credentials to get selected model
-    let (_, _, selected_model) = get_stored_credentials(&app).await?;
-    let (provider, model) = selected_model.as_ref().map_or((None, None), |m| {
-        (Some(m.provider.clone()), Some(m.model.clone()))
-    });
+    let requested_provider = provider.clone().map(|value| value.to_lowercase());
+    let requested_model = model.clone();
+    let is_direct_openai_request = requested_provider.as_deref() == Some("openai");
 
-    // Fetch API configuration
-    let api_config = fetch_api_response_config(&app, provider.clone(), model.clone()).await?;
+    let mut effective_provider: Option<String>;
+    let mut effective_model: Option<String>;
+    let mut api_config: ApiResponseConfig;
+
+    if is_direct_openai_request {
+        let openai_api_key = get_openai_api_key_from_storage(&app)?.ok_or_else(|| {
+            "OpenAI API key is not configured. Please add it in Settings.".to_string()
+        })?;
+        let selected_model = requested_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("gpt-5-nano")
+            .to_string();
+
+        effective_provider = Some("openai".to_string());
+        effective_model = Some(selected_model.clone());
+        api_config = ApiResponseConfig {
+            url: "https://api.openai.com/v1/chat/completions".to_string(),
+            user_token: openai_api_key,
+            model: selected_model,
+            body: "{}".to_string(),
+            customer_id: None,
+            customer_email: None,
+            customer_name: None,
+            license_key: String::new(),
+            instance_id: String::new(),
+            user_audio: None,
+            errors: None,
+        };
+    } else {
+        // Get stored credentials to get selected model
+        let (_, _, selected_model) = get_stored_credentials(&app).await?;
+        let (configured_provider, configured_model) = selected_model
+            .as_ref()
+            .map_or((None, None), |m| (Some(m.provider.clone()), Some(m.model.clone())));
+
+        // Fetch API configuration
+        api_config =
+            fetch_api_response_config(&app, configured_provider.clone(), configured_model.clone())
+                .await?;
+        effective_provider = configured_provider;
+        effective_model = configured_model;
+    }
+
+    if is_openai_endpoint(&api_config.url) {
+        let openai_api_key = get_openai_api_key_from_storage(&app)?.ok_or_else(|| {
+            "OpenAI API key is not configured. Please add it in Settings.".to_string()
+        })?;
+        api_config.user_token = openai_api_key;
+        if effective_provider.is_none() {
+            effective_provider = Some("openai".to_string());
+        }
+    }
+
+    if effective_model.is_none() {
+        effective_model = Some(api_config.model.clone());
+    }
 
     // Parse the body from API config to merge with our request
     let mut extra_body: serde_json::Value = if !api_config.body.is_empty() {
@@ -501,21 +755,13 @@ pub async fn chat_stream_response(
         serde_json::json!({})
     };
 
-    // Build messages array in OpenAI format
-    let mut messages: Vec<serde_json::Value> = Vec::new();
-
-    // Add system message if provided
-    if let Some(sys_prompt) = system_prompt {
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": sys_prompt
-        }));
-    }
+    // Build conversation messages (history + current user message)
+    let mut conversation_messages: Vec<serde_json::Value> = Vec::new();
 
     // Add history if provided
     if let Some(history_str) = history {
         if let Ok(history_messages) = serde_json::from_str::<Vec<serde_json::Value>>(&history_str) {
-            messages.extend(history_messages);
+            conversation_messages.extend(history_messages);
         }
     }
 
@@ -532,12 +778,14 @@ pub async fn chat_stream_response(
     if let Some(image_data) = image_base64 {
         if image_data.is_string() {
             // Single image
-            user_content.push(serde_json::json!({
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:image/jpeg;base64,{}", image_data.as_str().unwrap())
-                }
-            }));
+            if let Some(image_b64) = image_data.as_str() {
+                user_content.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", image_b64)
+                    }
+                }));
+            }
         } else if image_data.is_array() {
             // Multiple images
             if let Some(images) = image_data.as_array() {
@@ -556,32 +804,82 @@ pub async fn chat_stream_response(
     }
 
     // Add user message
-    messages.push(serde_json::json!({
+    conversation_messages.push(serde_json::json!({
         "role": "user",
         "content": user_content
     }));
 
+    let is_openai_responses =
+        is_openai_chat_completions_endpoint(&api_config.url, effective_provider.as_deref());
+    let request_url = if is_openai_responses {
+        api_config
+            .url
+            .replacen("/v1/chat/completions", "/v1/responses", 1)
+    } else {
+        api_config.url.clone()
+    };
+
     // Build request body
-    let mut request_body = serde_json::json!({
-        "model": api_config.model,
-        "messages": messages,
-        "stream": true
-    });
+    let mut request_body = if is_openai_responses {
+        let mut body = serde_json::json!({
+            "model": api_config.model,
+            "input": to_openai_responses_input(&conversation_messages),
+            "stream": true
+        });
+
+        if let Some(sys_prompt) = system_prompt.as_deref() {
+            if !sys_prompt.trim().is_empty() {
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert(
+                        "instructions".to_string(),
+                        serde_json::Value::String(sys_prompt.to_string()),
+                    );
+                }
+            }
+        }
+
+        body
+    } else {
+        let mut messages: Vec<serde_json::Value> = Vec::new();
+        if let Some(sys_prompt) = system_prompt.as_deref() {
+            if !sys_prompt.trim().is_empty() {
+                messages.push(serde_json::json!({
+                    "role": "system",
+                    "content": sys_prompt
+                }));
+            }
+        }
+        messages.extend(conversation_messages.clone());
+
+        serde_json::json!({
+            "model": api_config.model,
+            "messages": messages,
+            "stream": true
+        })
+    };
 
     // Merge extra body parameters from API config
     if let Some(extra_obj) = extra_body.as_object_mut() {
         if let Some(req_obj) = request_body.as_object_mut() {
             for (key, value) in extra_obj.iter() {
+                if is_openai_responses && key == "messages" {
+                    continue;
+                }
+                if is_openai_responses && key == "max_tokens" && !req_obj.contains_key("max_output_tokens") {
+                    req_obj.insert("max_output_tokens".to_string(), value.clone());
+                    continue;
+                }
                 req_obj.insert(key.clone(), value.clone());
             }
         }
     }
 
     // Make HTTP request to the configured endpoint with streaming
+    let request_started_at = Instant::now();
     let client = reqwest::Client::new();
     let error_rules = api_config.errors.clone().unwrap_or_default();
     let response = match client
-        .post(&api_config.url)
+        .post(&request_url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_config.user_token))
         .json(&request_body)
@@ -591,14 +889,14 @@ pub async fn chat_stream_response(
         Ok(resp) => resp,
         Err(e) => {
             let mut sources = vec![e.to_string()];
-            if let Ok(url) = Url::parse(&api_config.url) {
+            if let Ok(url) = Url::parse(&request_url) {
                 sources.push(url.to_string());
             }
             let final_message = map_api_error_message(&error_rules, &sources);
             tauri::async_runtime::spawn({
                 let app = app.clone();
-                let provider = provider.clone();
-                let model = model.clone();
+                let provider = effective_provider.clone();
+                let model = effective_model.clone();
                 let error_msg = e.to_string();
                 async move {
                     report_api_error(app, error_msg, "/api/chat".to_string(), model, provider)
@@ -632,8 +930,8 @@ pub async fn chat_stream_response(
         let final_message = map_api_error_message(&error_rules, &sources);
         tauri::async_runtime::spawn({
             let app = app.clone();
-            let provider = provider.clone();
-            let model = model.clone();
+            let provider = effective_provider.clone();
+            let model = effective_model.clone();
             let error_msg = format!("{}: {}", status, error_text);
             async move {
                 report_api_error(app, error_msg, "/api/chat".to_string(), model, provider).await;
@@ -675,27 +973,14 @@ pub async fn chat_stream_response(
                             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str)
                             {
                                 if usage.is_none() {
-                                    if let Some(collected) = parsed.get("usage") {
-                                        if !collected.is_null() {
-                                            usage = Some(collected.clone());
-                                        }
-                                    }
+                                    usage = extract_usage_metrics(&parsed);
                                 }
-                                if let Some(choices) =
-                                    parsed.get("choices").and_then(|c| c.as_array())
-                                {
-                                    if let Some(first_choice) = choices.first() {
-                                        if let Some(delta) = first_choice.get("delta") {
-                                            if let Some(content) =
-                                                delta.get("content").and_then(|c| c.as_str())
-                                            {
-                                                full_response.push_str(content);
-                                                // Emit just the content to frontend
-                                                let _ = app.emit("chat_stream_chunk", content);
-                                                stream_started = true;
-                                            }
-                                        }
-                                    }
+
+                                if let Some(content) = extract_stream_text_delta(&parsed) {
+                                    full_response.push_str(&content);
+                                    // Emit just the content to frontend
+                                    let _ = app.emit("chat_stream_chunk", content);
+                                    stream_started = true;
                                 }
                             }
                         }
@@ -710,8 +995,8 @@ pub async fn chat_stream_response(
                 let final_message = map_api_error_message(&error_rules, &sources);
                 tauri::async_runtime::spawn({
                     let app = app.clone();
-                    let provider = provider.clone();
-                    let model = model.clone();
+                    let provider = effective_provider.clone();
+                    let model = effective_model.clone();
                     let error_msg = e.to_string();
                     async move {
                         report_api_error(app, error_msg, "/api/chat".to_string(), model, provider)
@@ -743,6 +1028,20 @@ pub async fn chat_stream_response(
             }
         });
     }
+
+    let duration_ms = request_started_at.elapsed().as_millis();
+    let usage_log = usage
+        .as_ref()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    eprintln!(
+        "chat_stream_response metrics: provider={}, model={}, endpoint={}, duration_ms={}, usage={}",
+        effective_provider.as_deref().unwrap_or("unknown"),
+        api_config.model,
+        request_url,
+        duration_ms,
+        usage_log
+    );
 
     Ok(full_response)
 }

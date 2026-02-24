@@ -240,7 +240,24 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       STORAGE_KEYS.SELECTED_AI_PROVIDER
     );
     if (savedSelectedAi) {
-      setSelectedAIProvider(JSON.parse(savedSelectedAi));
+      try {
+        const parsed = JSON.parse(savedSelectedAi);
+        if (parsed?.provider === "openai" && parsed?.variables?.api_key) {
+          const { api_key: _removed, ...rest } = parsed.variables;
+          setSelectedAIProvider({ ...parsed, variables: rest });
+          safeLocalStorage.setItem(
+            STORAGE_KEYS.SELECTED_AI_PROVIDER,
+            JSON.stringify({ ...parsed, variables: rest })
+          );
+        } else {
+          setSelectedAIProvider(parsed);
+        }
+      } catch {
+        setSelectedAIProvider({
+          provider: "",
+          variables: {},
+        });
+      }
     }
 
     // Load selected STT provider
@@ -490,9 +507,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Sync selected AI to localStorage
   useEffect(() => {
     if (selectedAIProvider.provider) {
+      const storageValue =
+        selectedAIProvider.provider === "openai"
+          ? {
+              ...selectedAIProvider,
+              variables: Object.fromEntries(
+                Object.entries(selectedAIProvider.variables || {}).filter(
+                  ([key]) => key !== "api_key"
+                )
+              ),
+            }
+          : selectedAIProvider;
+
       safeLocalStorage.setItem(
         STORAGE_KEYS.SELECTED_AI_PROVIDER,
-        JSON.stringify(selectedAIProvider)
+        JSON.stringify(storageValue)
       );
     }
   }, [selectedAIProvider]);

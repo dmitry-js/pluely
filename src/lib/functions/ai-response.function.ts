@@ -43,12 +43,14 @@ function buildEnhancedSystemPrompt(baseSystemPrompt?: string): string {
   return prompts.join(" ");
 }
 
-// Pluely AI streaming function
-async function* fetchPluelyAIResponse(params: {
+// Backend AI streaming function
+async function* fetchBackendAIResponse(params: {
   systemPrompt?: string;
   userMessage: string;
   imagesBase64?: string[];
   history?: Message[];
+  provider?: string;
+  model?: string;
   signal?: AbortSignal;
 }): AsyncIterable<string> {
   try {
@@ -57,6 +59,8 @@ async function* fetchPluelyAIResponse(params: {
       userMessage,
       imagesBase64 = [],
       history = [],
+      provider,
+      model,
       signal,
     } = params;
 
@@ -103,12 +107,14 @@ async function* fetchPluelyAIResponse(params: {
         return;
       }
 
-      // Start the streaming request using the new API response endpoint
+      // Start the backend streaming request
       await invoke("chat_stream_response", {
         userMessage,
         systemPrompt,
         imageBase64,
         history: historyString,
+        provider,
+        model,
       });
 
       // Yield chunks as they come in
@@ -157,7 +163,7 @@ async function* fetchPluelyAIResponse(params: {
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    yield `Pluely API Error: ${errorMessage}`;
+    yield `Backend AI Error: ${errorMessage}`;
   }
 }
 
@@ -194,7 +200,7 @@ export async function* fetchAIResponse(params: {
     // Check if we should use Pluely API instead
     const usePluelyAPI = await shouldUsePluelyAPI();
     if (usePluelyAPI) {
-      yield* fetchPluelyAIResponse({
+      yield* fetchBackendAIResponse({
         systemPrompt: enhancedSystemPrompt,
         userMessage,
         imagesBase64,
@@ -208,6 +214,26 @@ export async function* fetchAIResponse(params: {
     }
     if (!selectedProvider) {
       throw new Error(`Selected provider not provided`);
+    }
+
+    const isOpenAIProvider =
+      provider?.id === "openai" || selectedProvider?.provider === "openai";
+    if (isOpenAIProvider) {
+      const selectedModel =
+        selectedProvider?.variables?.model ||
+        selectedProvider?.variables?.MODEL ||
+        "";
+
+      yield* fetchBackendAIResponse({
+        systemPrompt: enhancedSystemPrompt,
+        userMessage,
+        imagesBase64,
+        history,
+        provider: "openai",
+        model: selectedModel,
+        signal,
+      });
+      return;
     }
 
     let curlJson;

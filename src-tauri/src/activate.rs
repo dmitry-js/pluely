@@ -48,6 +48,7 @@ struct SecureStorage {
     license_key: Option<String>,
     instance_id: Option<String>,
     selected_pluely_model: Option<String>,
+    openai_api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

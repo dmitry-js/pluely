@@ -1,6 +1,7 @@
 import { Button, Header, Input, Selection, TextInput } from "@/components";
 import { UseSettingsReturn } from "@/types";
 import curl2Json, { ResultJSON } from "@bany/curl-to-json";
+import { invoke } from "@tauri-apps/api/core";
 import { KeyIcon, TrashIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -12,6 +13,10 @@ export const Providers = ({
 }: UseSettingsReturn) => {
   const [localSelectedProvider, setLocalSelectedProvider] =
     useState<ResultJSON | null>(null);
+  const [openAIKeyInput, setOpenAIKeyInput] = useState("");
+  const [openAIKeyConfigured, setOpenAIKeyConfigured] = useState(false);
+  const [isOpenAIKeyLoading, setIsOpenAIKeyLoading] = useState(false);
+  const isOpenAIProvider = selectedAIProvider?.provider === "openai";
 
   useEffect(() => {
     if (selectedAIProvider?.provider) {
@@ -25,11 +30,40 @@ export const Providers = ({
     }
   }, [selectedAIProvider?.provider]);
 
+  useEffect(() => {
+    if (!isOpenAIProvider) {
+      setOpenAIKeyInput("");
+      setOpenAIKeyConfigured(false);
+      return;
+    }
+
+    let isCancelled = false;
+    const loadOpenAIKeyStatus = async () => {
+      try {
+        const status = await invoke<boolean>("get_openai_api_key_status");
+        if (!isCancelled) {
+          setOpenAIKeyConfigured(status);
+        }
+      } catch (error) {
+        console.error("Failed to get OpenAI API key status:", error);
+        if (!isCancelled) {
+          setOpenAIKeyConfigured(false);
+        }
+      }
+    };
+
+    loadOpenAIKeyStatus();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpenAIProvider]);
+
   const findKeyAndValue = (key: string) => {
     return variables?.find((v) => v?.key === key);
   };
 
   const getApiKeyValue = () => {
+    if (isOpenAIProvider) return openAIKeyInput;
     const apiKeyVar = findKeyAndValue("api_key");
     if (!apiKeyVar || !selectedAIProvider?.variables) return "";
     return selectedAIProvider?.variables?.[apiKeyVar.key] || "";
@@ -38,6 +72,52 @@ export const Providers = ({
   const isApiKeyEmpty = () => {
     return !getApiKeyValue().trim();
   };
+
+  const stripOpenAIApiKeyFromLocalState = () => {
+    const apiKeyVar = findKeyAndValue("api_key");
+    if (!apiKeyVar || !selectedAIProvider?.variables?.[apiKeyVar.key]) return;
+
+    const { [apiKeyVar.key]: _removed, ...rest } = selectedAIProvider.variables;
+    onSetSelectedAIProvider({
+      ...selectedAIProvider,
+      variables: rest,
+    });
+  };
+
+  const saveOpenAIKey = async () => {
+    if (!openAIKeyInput.trim()) return;
+    setIsOpenAIKeyLoading(true);
+    try {
+      await invoke("set_openai_api_key", { key: openAIKeyInput.trim() });
+      stripOpenAIApiKeyFromLocalState();
+      setOpenAIKeyConfigured(true);
+      setOpenAIKeyInput("");
+    } catch (error) {
+      console.error("Failed to save OpenAI API key:", error);
+    } finally {
+      setIsOpenAIKeyLoading(false);
+    }
+  };
+
+  const clearOpenAIKey = async () => {
+    setIsOpenAIKeyLoading(true);
+    try {
+      await invoke("clear_openai_api_key");
+      stripOpenAIApiKeyFromLocalState();
+      setOpenAIKeyConfigured(false);
+      setOpenAIKeyInput("");
+    } catch (error) {
+      console.error("Failed to clear OpenAI API key:", error);
+    } finally {
+      setIsOpenAIKeyLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpenAIProvider) {
+      stripOpenAIApiKeyFromLocalState();
+    }
+  }, [isOpenAIProvider, selectedAIProvider?.variables]);
 
   return (
     <div className="space-y-3">
@@ -87,7 +167,11 @@ export const Providers = ({
               )?.isCustom
                 ? "Custom Provider"
                 : selectedAIProvider?.provider
-            } API key to authenticate and access AI models. Your key is stored locally and never shared.`}
+            } API key to authenticate and access AI models. ${
+              isOpenAIProvider
+                ? `Status: ${openAIKeyConfigured ? "Connected" : "Not configured"}`
+                : "Your key is stored locally and never shared."
+            }`}
           />
 
           <div className="space-y-2">
@@ -97,6 +181,13 @@ export const Providers = ({
                 placeholder="**********"
                 value={getApiKeyValue()}
                 onChange={(value) => {
+                  if (isOpenAIProvider) {
+                    setOpenAIKeyInput(
+                      typeof value === "string" ? value : value.target.value
+                    );
+                    return;
+                  }
+
                   const apiKeyVar = findKeyAndValue("api_key");
                   if (!apiKeyVar || !selectedAIProvider) return;
 
@@ -110,6 +201,11 @@ export const Providers = ({
                   });
                 }}
                 onKeyDown={(e) => {
+                  if (isOpenAIProvider) {
+                    setOpenAIKeyInput((e.target as HTMLInputElement).value);
+                    return;
+                  }
+
                   const apiKeyVar = findKeyAndValue("api_key");
                   if (!apiKeyVar || !selectedAIProvider) return;
 
@@ -124,7 +220,30 @@ export const Providers = ({
                 disabled={false}
                 className="flex-1 h-11 border-1 border-input/50 focus:border-primary/50 transition-colors"
               />
-              {isApiKeyEmpty() ? (
+              {isOpenAIProvider ? (
+                openAIKeyConfigured && isApiKeyEmpty() ? (
+                  <Button
+                    onClick={clearOpenAIKey}
+                    size="icon"
+                    variant="destructive"
+                    className="shrink-0 h-11 w-11"
+                    title="Clear API Key"
+                    disabled={isOpenAIKeyLoading}
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={saveOpenAIKey}
+                    disabled={isApiKeyEmpty() || isOpenAIKeyLoading}
+                    size="icon"
+                    className="shrink-0 h-11 w-11"
+                    title="Save API Key"
+                  >
+                    <KeyIcon className="h-4 w-4" />
+                  </Button>
+                )
+              ) : isApiKeyEmpty() ? (
                 <Button
                   onClick={() => {
                     const apiKeyVar = findKeyAndValue("api_key");
