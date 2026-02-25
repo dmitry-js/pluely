@@ -219,6 +219,7 @@ export const useCompletion = () => {
             imagesBase64,
             signal,
           })) {
+            // console.log("UI append chunk:", chunk.length)
             // Only update if this is still the current request
             if (currentRequestIdRef.current !== requestId) {
               return; // Request was superseded, stop processing

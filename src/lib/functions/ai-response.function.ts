@@ -11,7 +11,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import curl2Json from "@bany/curl-to-json";
 import { shouldUsePluelyAPI } from "./pluely.api";
-import { CHUNK_POLL_INTERVAL_MS } from "../chat-constants";
 import { getResponseSettings, RESPONSE_LENGTHS, LANGUAGES } from "@/lib";
 import { MARKDOWN_FORMATTING_INSTRUCTIONS } from "@/config/constants";
 
@@ -97,29 +96,79 @@ async function* fetchBackendAIResponse(params: {
       imageBase64 = imagesBase64.length === 1 ? imagesBase64[0] : imagesBase64;
     }
 
-    // Set up streaming event listener
-    let streamComplete = false;
-    const streamChunks: string[] = [];
+    const isDev = import.meta.env.DEV;
+    const invokeStartedAt = Date.now();
+    let firstChunkAt: number | null = null;
+    let chunkCount = 0;
 
-    const unlisten = await listen("chat_stream_chunk", (event) => {
-      const chunk = event.payload as string;
-      streamChunks.push(chunk);
-    });
+    if (isDev) {
+      console.debug(
+        `[stream][backend] invoke start at ${new Date(
+          invokeStartedAt
+        ).toISOString()}`
+      );
+    }
 
-    const unlistenComplete = await listen("chat_stream_complete", () => {
-      streamComplete = true;
-    });
+    // Set up streaming event listeners BEFORE invoke to avoid missing early chunks.
+    const streamQueue: string[] = [];
+    let streamDone = false;
+    let invokeSettled = false;
+    let invokeError: unknown = null;
+    let pendingResolve: (() => void) | null = null;
+
+    const notify = () => {
+      if (pendingResolve) {
+        const resolve = pendingResolve;
+        pendingResolve = null;
+        resolve();
+      }
+    };
+
+    let unlistenChunk: () => void = () => {};
+    let unlistenComplete: () => void = () => {};
+    let unlistenDone: () => void = () => {};
+    const onAbort = () => notify();
 
     try {
+      unlistenChunk = await listen("chat_stream_chunk", (event) => {
+        const chunk = event.payload as string;
+        streamQueue.push(chunk);
+        chunkCount += 1;
+
+        if (firstChunkAt === null) {
+          firstChunkAt = Date.now();
+          if (isDev) {
+            console.debug(
+              `[stream][backend] first chunk at ${new Date(
+                firstChunkAt
+              ).toISOString()} (+${firstChunkAt - invokeStartedAt}ms)`
+            );
+          }
+        }
+
+        notify();
+      });
+
+      unlistenComplete = await listen("chat_stream_complete", () => {
+        streamDone = true;
+        notify();
+      });
+
+      // Optional compatibility event.
+      unlistenDone = await listen("chat_stream_done", () => {
+        streamDone = true;
+        notify();
+      });
+
       // Check if aborted before starting invoke
       if (signal?.aborted) {
-        unlisten();
-        unlistenComplete();
         return;
       }
 
-      // Start the backend streaming request
-      await invoke("chat_stream_response", {
+      signal?.addEventListener("abort", onAbort);
+
+      // Start invoke in parallel and drain queue immediately.
+      const invokePromise = invoke("chat_stream_response", {
         userMessage,
         systemPrompt,
         imageBase64,
@@ -127,51 +176,61 @@ async function* fetchBackendAIResponse(params: {
         provider,
         model,
         responseLength,
-      });
+      })
+        .catch((error) => {
+          invokeError = error;
+        })
+        .finally(() => {
+          invokeSettled = true;
+          streamDone = true;
+          notify();
+        });
 
-      // Yield chunks as they come in
-      let lastIndex = 0;
-      while (!streamComplete) {
-        // Check if aborted during streaming
+      // Yield chunks as soon as they arrive.
+      while (true) {
         if (signal?.aborted) {
-          unlisten();
-          unlistenComplete();
           return;
         }
 
-        // Wait a bit for chunks to accumulate
-        await new Promise((resolve) =>
-          setTimeout(resolve, CHUNK_POLL_INTERVAL_MS)
+        while (streamQueue.length > 0) {
+          const nextChunk = streamQueue.shift();
+          if (nextChunk) {
+            yield nextChunk;
+          }
+        }
+
+        if (invokeError) {
+          throw invokeError;
+        }
+
+        if (invokeSettled && streamDone && streamQueue.length === 0) {
+          break;
+        }
+
+        await new Promise<void>((resolve) => {
+          pendingResolve = resolve;
+        });
+      }
+
+      await invokePromise;
+
+      if (isDev) {
+        const doneAt = Date.now();
+        console.debug(
+          `[stream][backend] stream done at ${new Date(
+            doneAt
+          ).toISOString()} (chunks=${chunkCount})`
         );
-
-        // Check again after timeout
-        if (signal?.aborted) {
-          unlisten();
-          unlistenComplete();
-          return;
-        }
-
-        // Yield any new chunks
-        for (let i = lastIndex; i < streamChunks.length; i++) {
-          yield streamChunks[i];
-        }
-        lastIndex = streamChunks.length;
-      }
-
-      // Final abort check before yielding remaining chunks
-      if (signal?.aborted) {
-        unlisten();
-        unlistenComplete();
-        return;
-      }
-
-      // Yield any remaining chunks
-      for (let i = lastIndex; i < streamChunks.length; i++) {
-        yield streamChunks[i];
       }
     } finally {
-      unlisten();
+      signal?.removeEventListener("abort", onAbort);
+      if (pendingResolve) {
+        pendingResolve();
+        pendingResolve = null;
+      }
+      unlistenChunk();
       unlistenComplete();
+      unlistenDone();
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
