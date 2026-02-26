@@ -8,7 +8,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_machine_uid::MachineUidExt;
 
 const OPENAI_USER_HISTORY_LIMIT: usize = 3;
@@ -734,6 +734,7 @@ fn extract_usage_metrics(parsed: &serde_json::Value) -> Option<serde_json::Value
 #[tauri::command]
 pub async fn chat_stream_response(
     app: AppHandle,
+    http_client: State<'_, reqwest::Client>,
     user_message: String,
     system_prompt: Option<String>,
     image_base64: Option<serde_json::Value>,
@@ -1031,7 +1032,7 @@ pub async fn chat_stream_response(
 
     // Make HTTP request to the configured endpoint with streaming
     let request_started_at = Instant::now();
-    let client = reqwest::Client::new();
+    let client = http_client.inner().clone();
     let error_rules = api_config.errors.clone().unwrap_or_default();
 
     let response = match client
@@ -1102,6 +1103,7 @@ pub async fn chat_stream_response(
     let mut buffer = String::new();
     let mut usage: Option<serde_json::Value> = None;
     let mut stream_started = false;
+    let mut first_chunk_at_ms: Option<u128> = None;
 
     while let Some(chunk) = stream.next().await {
         match chunk {
@@ -1133,6 +1135,14 @@ pub async fn chat_stream_response(
                                 }
 
                                 if let Some(content) = extract_stream_text_delta(&parsed) {
+                                    if first_chunk_at_ms.is_none() {
+                                        let first_ms = request_started_at.elapsed().as_millis();
+                                        first_chunk_at_ms = Some(first_ms);
+                                        eprintln!(
+                                            "[stream][backend] first chunk at +{}ms",
+                                            first_ms
+                                        );
+                                    }
                                     full_response.push_str(&content);
                                     // Emit just the content to frontend
                                     let _ = app.emit("chat_stream_chunk", content);
@@ -1190,12 +1200,16 @@ pub async fn chat_stream_response(
         .as_ref()
         .map(|value| value.to_string())
         .unwrap_or_else(|| "null".to_string());
+    let first_chunk_log = first_chunk_at_ms
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string());
     eprintln!(
-        "chat_stream_response metrics: provider={}, model={}, endpoint={}, duration_ms={}, usage={}",
+        "chat_stream_response metrics: provider={}, model={}, endpoint={}, duration_ms={}, first_chunk_ms={}, usage={}",
         effective_provider.as_deref().unwrap_or("unknown"),
         api_config.model,
         request_url,
         duration_ms,
+        first_chunk_log,
         usage_log
     );
 

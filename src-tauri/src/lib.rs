@@ -33,12 +33,18 @@ fn get_app_version() -> String {
 pub fn run() {
     // Get PostHog API key
     let posthog_api_key = option_env!("POSTHOG_API_KEY").unwrap_or("").to_string();
+    // Reuse one HTTP client so requests share keep-alive connections and pool state.
+    let shared_http_client = reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .build()
+        .expect("client");
     let mut builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:pluely.db", db::migrations())
                 .build(),
         )
+        .manage(shared_http_client)
         .manage(AudioState::default())
         .manage(CaptureState::default())
         .manage(shortcuts::WindowVisibility {
