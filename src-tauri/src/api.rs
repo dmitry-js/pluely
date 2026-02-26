@@ -3,6 +3,7 @@ use futures_util::StreamExt;
 use reqwest::multipart::{Form, Part};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -11,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_machine_uid::MachineUidExt;
 
 const OPENAI_USER_HISTORY_LIMIT: usize = 3;
-const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 150;
+const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 200;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
 
@@ -621,6 +622,43 @@ fn to_responses_content(content: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+fn to_responses_assistant_content(content: &serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::String(text) => serde_json::json!([{
+            "type": "output_text",
+            "text": text
+        }]),
+        serde_json::Value::Array(items) => {
+            let mut normalized: Vec<serde_json::Value> = Vec::new();
+
+            for item in items {
+                let item_type = item.get("type").and_then(|value| value.as_str());
+                match item_type {
+                    Some("text") | Some("input_text") | Some("output_text") => {
+                        if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
+                            normalized.push(serde_json::json!({
+                                "type": "output_text",
+                                "text": text
+                            }));
+                        }
+                    }
+                    _ => {
+                        if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
+                            normalized.push(serde_json::json!({
+                                "type": "output_text",
+                                "text": text
+                            }));
+                        }
+                    }
+                }
+            }
+
+            serde_json::Value::Array(normalized)
+        }
+        _ => serde_json::json!([]),
+    }
+}
+
 fn to_openai_responses_input(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let mut input: Vec<serde_json::Value> = Vec::new();
 
@@ -635,7 +673,11 @@ fn to_openai_responses_input(messages: &[serde_json::Value]) -> Vec<serde_json::
         }
 
         let content = message.get("content").cloned().unwrap_or(serde_json::json!(""));
-        let mapped_content = to_responses_content(&content);
+        let mapped_content = if role == "assistant" {
+            to_responses_assistant_content(&content)
+        } else {
+            to_responses_content(&content)
+        };
 
         input.push(serde_json::json!({
             "role": role,
@@ -775,31 +817,50 @@ pub async fn chat_stream_response(
 
     // Build conversation messages (history + current user message)
     let mut conversation_messages: Vec<serde_json::Value> = Vec::new();
-    let mut included_history_count = 0usize;
+    let mut included_user_history_count = 0usize;
+    let mut included_assistant_history_count = 0usize;
 
     // Add history if provided
     if let Some(history_str) = history {
         if let Ok(history_messages) = serde_json::from_str::<Vec<serde_json::Value>>(&history_str) {
             if is_openai_responses {
-                let mut user_history: Vec<serde_json::Value> = history_messages
-                    .into_iter()
-                    .filter(|message| {
-                        message
-                            .get("role")
-                            .and_then(|role| role.as_str())
-                            == Some("user")
+                let mut user_indices: Vec<usize> = history_messages
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, message)| {
+                        (message.get("role").and_then(|role| role.as_str()) == Some("user"))
+                            .then_some(index)
                     })
                     .collect();
 
-                if user_history.len() > OPENAI_USER_HISTORY_LIMIT {
-                    let split_at = user_history.len() - OPENAI_USER_HISTORY_LIMIT;
-                    user_history = user_history.split_off(split_at);
+                if user_indices.len() > OPENAI_USER_HISTORY_LIMIT {
+                    let keep_from = user_indices.len() - OPENAI_USER_HISTORY_LIMIT;
+                    user_indices = user_indices.split_off(keep_from);
                 }
 
-                included_history_count = user_history.len();
-                conversation_messages.extend(user_history);
+                let user_index_set: HashSet<usize> = user_indices.into_iter().collect();
+                let latest_assistant_index = history_messages
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(index, message)| {
+                        (message
+                            .get("role")
+                            .and_then(|role| role.as_str())
+                            == Some("assistant"))
+                        .then_some(index)
+                    });
+
+                for (index, message) in history_messages.into_iter().enumerate() {
+                    if user_index_set.contains(&index) {
+                        included_user_history_count += 1;
+                        conversation_messages.push(message);
+                    } else if latest_assistant_index == Some(index) {
+                        included_assistant_history_count = 1;
+                        conversation_messages.push(message);
+                    }
+                }
             } else {
-                included_history_count = history_messages.len();
                 conversation_messages.extend(history_messages);
             }
         }
@@ -851,8 +912,9 @@ pub async fn chat_stream_response(
 
     if is_openai_responses {
         eprintln!(
-            "chat_stream_response openai history: included_user_history={}, limit={}, total_input_messages={}",
-            included_history_count,
+            "chat_stream_response openai history: included_user_history={}, included_assistant_history={}, limit={}, total_input_messages={}",
+            included_user_history_count,
+            included_assistant_history_count,
             OPENAI_USER_HISTORY_LIMIT,
             conversation_messages.len()
         );
