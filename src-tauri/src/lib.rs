@@ -166,7 +166,7 @@ pub fn run() {
                                 let registered = match state.shortcuts.lock() {
                                     Ok(guard) => guard,
                                     Err(poisoned) => {
-                                        eprintln!("Mutex poisoned in handler, recovering...");
+                                        // eprintln!("Mutex poisoned in handler, recovering...");
                                         poisoned.into_inner()
                                     }
                                 };
@@ -189,7 +189,7 @@ pub fn run() {
                                         {
                                             shortcuts::start_move_window(app, direction);
                                         } else {
-                                            eprintln!("Shortcut triggered: {}", action_id);
+                                            // eprintln!("Shortcut triggered: {}", action_id);
                                             shortcuts::handle_shortcut_action(app, &action_id);
                                         }
                                     }
@@ -206,8 +206,8 @@ pub fn run() {
                         .build(),
                 )
                 .expect("Failed to initialize global shortcut plugin");
-            if let Err(e) = shortcuts::setup_global_shortcuts(app.handle()) {
-                eprintln!("Failed to setup global shortcuts: {}", e);
+            if let Err(_e) = shortcuts::setup_global_shortcuts(app.handle()) {
+                // eprintln!("Failed to setup global shortcuts: {}", _e);
             }
 
             // Non-blocking one-time warm-up to prime DNS/TLS/connection pool for first AI request.
