@@ -7,14 +7,18 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_machine_uid::MachineUidExt;
 
 const OPENAI_USER_HISTORY_LIMIT: usize = 3;
+const OPENAI_WARMUP_DEFAULT_MODEL: &str = "gpt-5-nano-2025-08-07";
+const OPENAI_WARMUP_MAX_OUTPUT_TOKENS: i64 = 2;
 const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 200;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
+static OPENAI_WARMUP_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn normalize_openai_response_length(value: Option<&str>) -> String {
     match value.unwrap_or("short").trim().to_lowercase().as_str() {
@@ -93,6 +97,91 @@ fn get_openai_api_key_from_storage(app: &AppHandle) -> Result<Option<String>, St
         .openai_api_key
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty()))
+}
+
+fn resolve_openai_warmup_model(app: &AppHandle) -> String {
+    read_secure_storage(app)
+        .ok()
+        .and_then(|storage| storage.selected_pluely_model)
+        .and_then(|json| serde_json::from_str::<Model>(&json).ok())
+        .filter(|model| model.provider.eq_ignore_ascii_case("openai"))
+        .map(|model| model.model.trim().to_string())
+        .filter(|model| !model.is_empty())
+        .unwrap_or_else(|| OPENAI_WARMUP_DEFAULT_MODEL.to_string())
+}
+
+pub async fn warmup_openai_connection(app: AppHandle, http_client: reqwest::Client) {
+    if OPENAI_WARMUP_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    let api_key = match get_openai_api_key_from_storage(&app) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            if cfg!(debug_assertions) {
+                eprintln!("[warmup] skipped: OpenAI API key is not configured");
+            }
+            return;
+        }
+        Err(error) => {
+            if cfg!(debug_assertions) {
+                eprintln!("[warmup] skipped: failed to read OpenAI API key: {}", error);
+            }
+            return;
+        }
+    };
+
+    let model = resolve_openai_warmup_model(&app);
+    let started_at = Instant::now();
+    if cfg!(debug_assertions) {
+        eprintln!("[warmup] start: model={}", model);
+    }
+
+    let request_body = serde_json::json!({
+        "model": model,
+        "instructions": "Warm-up request. Reply minimally.",
+        "input": [{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "ping"
+            }]
+        }],
+        "reasoning": { "effort": "minimal" },
+        "max_output_tokens": OPENAI_WARMUP_MAX_OUTPUT_TOKENS,
+        "stream": false
+    });
+
+    let result = http_client
+        .post("https://api.openai.com/v1/responses")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&request_body)
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await;
+
+    let duration_ms = started_at.elapsed().as_millis();
+    match result {
+        Ok(response) => {
+            if cfg!(debug_assertions) {
+                eprintln!(
+                    "[warmup] done: success={}, status={}, duration_ms={}",
+                    response.status().is_success(),
+                    response.status(),
+                    duration_ms
+                );
+            }
+        }
+        Err(error) => {
+            if cfg!(debug_assertions) {
+                eprintln!("[warmup] failed: duration_ms={}, error={}", duration_ms, error);
+            }
+        }
+    }
 }
 
 pub async fn get_stored_credentials(

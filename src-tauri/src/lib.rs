@@ -209,6 +209,13 @@ pub fn run() {
             if let Err(e) = shortcuts::setup_global_shortcuts(app.handle()) {
                 eprintln!("Failed to setup global shortcuts: {}", e);
             }
+
+            // Non-blocking one-time warm-up to prime DNS/TLS/connection pool for first AI request.
+            let app_handle = app.handle().clone();
+            let http_client = app.state::<reqwest::Client>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                api::warmup_openai_connection(app_handle, http_client).await;
+            });
             Ok(())
         });
 
