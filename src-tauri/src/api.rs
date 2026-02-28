@@ -14,7 +14,7 @@ use tauri_plugin_machine_uid::MachineUidExt;
 
 const OPENAI_USER_HISTORY_LIMIT: usize = 3;
 const OPENAI_WARMUP_DEFAULT_MODEL: &str = "gpt-5-nano-2025-08-07";
-const OPENAI_WARMUP_MAX_OUTPUT_TOKENS: i64 = 2;
+const OPENAI_WARMUP_MAX_OUTPUT_TOKENS: i64 = 16;
 const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 200;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
@@ -142,17 +142,8 @@ pub async fn warmup_openai_connection(app: AppHandle, http_client: reqwest::Clie
 
     let request_body = serde_json::json!({
         "model": model,
-        "instructions": "Warm-up request. Reply minimally.",
-        "input": [{
-            "role": "user",
-            "content": [{
-                "type": "input_text",
-                "text": "ping"
-            }]
-        }],
-        "reasoning": { "effort": "minimal" },
+        "input": "ping",
         "max_output_tokens": OPENAI_WARMUP_MAX_OUTPUT_TOKENS,
-        "stream": false
     });
 
     let result = http_client
