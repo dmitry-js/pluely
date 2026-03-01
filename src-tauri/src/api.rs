@@ -16,6 +16,7 @@ const OPENAI_USER_HISTORY_LIMIT: usize = 3;
 const OPENAI_WARMUP_DEFAULT_MODEL: &str = "gpt-5-nano-2025-08-07";
 const OPENAI_WARMUP_MAX_OUTPUT_TOKENS: i64 = 16;
 const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 200;
+const OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS: i64 = 450;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
 static OPENAI_WARMUP_STARTED: AtomicBool = AtomicBool::new(false);
@@ -27,6 +28,67 @@ fn normalize_openai_response_length(value: Option<&str>) -> String {
         "auto" => "auto".to_string(),
         _ => "short".to_string(),
     }
+}
+
+fn has_code_intent(message: &str) -> bool {
+    let normalized = message.to_lowercase();
+    let original = message;
+
+    // Obvious code markers.
+    let code_markers = [
+        "```",
+        "`",
+        "import",
+        "export",
+        "function",
+        "const",
+        "let",
+        "=>",
+        ".tsx",
+        ".ts",
+        ".js",
+    ];
+    if code_markers.iter().any(|marker| normalized.contains(marker)) {
+        return true;
+    }
+
+    if original.contains("useEffect(")
+        || original.contains("useState(")
+        || original.contains("useMemo(")
+        || original.contains("useCallback(")
+    {
+        return true;
+    }
+    if normalized.contains("useeffect(")
+        || normalized.contains("usestate(")
+        || normalized.contains("usememo(")
+        || normalized.contains("usecallback(")
+    {
+        return true;
+    }
+
+    // Code-intent verbs/phrases (RU + EN).
+    let code_intent_phrases = [
+        "напиши",
+        "реализуй",
+        "покажи код",
+        "пример кода",
+        "кодом",
+        "исправь",
+        "почини",
+        "отрефактори",
+        "оптимизируй",
+        "допиши",
+        "write code",
+        "implement",
+        "fix",
+        "refactor",
+        "optimize",
+        "example code",
+    ];
+    code_intent_phrases
+        .iter()
+        .any(|phrase| normalized.contains(phrase))
 }
 
 fn get_app_endpoint() -> Result<String, String> {
@@ -823,6 +885,7 @@ pub async fn chat_stream_response(
     model: Option<String>,
     response_length: Option<String>,
 ) -> Result<String, String> {
+    let user_message_code_intent = has_code_intent(&user_message);
     let requested_provider = provider.clone().map(|value| value.to_lowercase());
     let requested_model = model.clone();
     let is_direct_openai_request = requested_provider.as_deref() == Some("openai");
@@ -1017,8 +1080,12 @@ pub async fn chat_stream_response(
     // Build request body
     let mut request_body = if is_openai_responses {
         let selected_length = openai_response_length.as_deref().unwrap_or("short");
+        let mut short_mode_max_tokens = OPENAI_SHORT_MAX_OUTPUT_TOKENS;
+        if selected_length == "short" && user_message_code_intent {
+            short_mode_max_tokens = OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS;
+        }
         let (max_output_tokens, reasoning_effort): (Option<i64>, &str) = match selected_length {
-            "short" => (Some(OPENAI_SHORT_MAX_OUTPUT_TOKENS), "minimal"),
+            "short" => (Some(short_mode_max_tokens), "minimal"),
             "medium" => (Some(OPENAI_MEDIUM_MAX_OUTPUT_TOKENS), "medium"),
             "auto" => (Some(OPENAI_AUTO_MAX_OUTPUT_TOKENS), "medium"),
             _ => (Some(OPENAI_SHORT_MAX_OUTPUT_TOKENS), "minimal"),
@@ -1104,9 +1171,14 @@ pub async fn chat_stream_response(
             .and_then(|value| value.get("effort"))
             .and_then(|value| value.as_str())
             .unwrap_or("none");
+        let code_intent_log = if selected_length == "short" {
+            user_message_code_intent.to_string()
+        } else {
+            "n/a".to_string()
+        };
         eprintln!(
-            "chat_stream_response openai response controls: response_length={}, max_output_tokens={}, reasoning_effort={}",
-            selected_length, max_output_tokens_log, reasoning_effort_log
+            "chat_stream_response openai response controls: response_length={}, code_intent={}, max_output_tokens={}, reasoning_effort={}",
+            selected_length, code_intent_log, max_output_tokens_log, reasoning_effort_log
         );
     }
 
