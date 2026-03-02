@@ -20,6 +20,8 @@ const OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS: i64 = 450;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
 static OPENAI_WARMUP_STARTED: AtomicBool = AtomicBool::new(false);
+static OPENAI_WARMUP_DISABLED: AtomicBool = AtomicBool::new(false);
+static OPENAI_CHAT_REQUEST_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn normalize_openai_response_length(value: Option<&str>) -> String {
     match value.unwrap_or("short").trim().to_lowercase().as_str() {
@@ -173,10 +175,21 @@ fn resolve_openai_warmup_model(app: &AppHandle) -> String {
 }
 
 pub async fn warmup_openai_connection(app: AppHandle, http_client: reqwest::Client) {
+    if OPENAI_WARMUP_DISABLED.load(Ordering::SeqCst) {
+        return;
+    }
+
     if OPENAI_WARMUP_STARTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
+        return;
+    }
+
+    if OPENAI_CHAT_REQUEST_STARTED.load(Ordering::SeqCst) {
+        if cfg!(debug_assertions) {
+            eprintln!("[warmup] skipped: chat request already started");
+        }
         return;
     }
 
@@ -220,6 +233,10 @@ pub async fn warmup_openai_connection(app: AppHandle, http_client: reqwest::Clie
     let duration_ms = started_at.elapsed().as_millis();
     match result {
         Ok(response) => {
+            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                OPENAI_WARMUP_DISABLED.store(true, Ordering::SeqCst);
+                eprintln!("[warmup] disabled due to 429");
+            }
             if cfg!(debug_assertions) {
                 eprintln!(
                     "[warmup] done: success={}, status={}, duration_ms={}",
@@ -885,6 +902,7 @@ pub async fn chat_stream_response(
     model: Option<String>,
     response_length: Option<String>,
 ) -> Result<String, String> {
+    OPENAI_CHAT_REQUEST_STARTED.store(true, Ordering::SeqCst);
     let user_message_code_intent = has_code_intent(&user_message);
     let requested_provider = provider.clone().map(|value| value.to_lowercase());
     let requested_model = model.clone();
@@ -1219,10 +1237,13 @@ pub async fn chat_stream_response(
     // Check if the response is successful
     if !response.status().is_success() {
         let status = response.status();
+        let response_headers = response.headers().clone();
         let error_text = response
             .text()
             .await
             .unwrap_or_else(|_| "Unknown server error".to_string());
+        eprintln!("OPENAI ERROR STATUS: {}", status);
+        eprintln!("OPENAI ERROR BODY: {}", error_text);
 
         let mut sources = vec![error_text.clone(), status.to_string()];
 
@@ -1236,7 +1257,47 @@ pub async fn chat_stream_response(
             }
         }
 
-        let final_message = map_api_error_message(&error_rules, &sources);
+        let is_openai_rate_limited =
+            is_openai_endpoint(&request_url) && status == reqwest::StatusCode::TOO_MANY_REQUESTS;
+        let retry_after_seconds = response_headers
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok());
+
+        if is_openai_rate_limited {
+            let header_value = |name: &str| -> String {
+                response_headers
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            };
+
+            eprintln!(
+                "chat_stream_response openai rate_limit_429: x_request_id={}, retry_after={}, x_ratelimit_limit_requests={}, x_ratelimit_remaining_requests={}, x_ratelimit_limit_tokens={}, x_ratelimit_remaining_tokens={}, x_ratelimit_reset_requests={}, x_ratelimit_reset_tokens={}",
+                header_value("x-request-id"),
+                header_value("retry-after"),
+                header_value("x-ratelimit-limit-requests"),
+                header_value("x-ratelimit-remaining-requests"),
+                header_value("x-ratelimit-limit-tokens"),
+                header_value("x-ratelimit-remaining-tokens"),
+                header_value("x-ratelimit-reset-requests"),
+                header_value("x-ratelimit-reset-tokens"),
+            );
+        }
+
+        let final_message = if is_openai_rate_limited {
+            if let Some(wait_seconds) = retry_after_seconds {
+                format!(
+                    "Rate limit reached. Please wait {} seconds and try again.",
+                    wait_seconds
+                )
+            } else {
+                "Rate limit reached. Please wait a few seconds and try again.".to_string()
+            }
+        } else {
+            map_api_error_message(&error_rules, &sources)
+        };
         tauri::async_runtime::spawn({
             let app = app.clone();
             let provider = effective_provider.clone();
@@ -1246,6 +1307,16 @@ pub async fn chat_stream_response(
                 report_api_error(app, error_msg, "/api/chat".to_string(), model, provider).await;
             }
         });
+
+        let duration_ms = request_started_at.elapsed().as_millis();
+        eprintln!(
+            "chat_stream_response metrics: provider={}, model={}, endpoint={}, duration_ms={}, first_chunk_ms=none, usage=null, status={}",
+            effective_provider.as_deref().unwrap_or("unknown"),
+            api_config.model,
+            request_url,
+            duration_ms,
+            status
+        );
         return Err(final_message);
     }
 

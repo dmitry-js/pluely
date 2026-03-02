@@ -214,6 +214,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let http_client = app.state::<reqwest::Client>().inner().clone();
             tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 api::warmup_openai_connection(app_handle, http_client).await;
             });
             Ok(())
