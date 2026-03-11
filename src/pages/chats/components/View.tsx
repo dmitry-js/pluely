@@ -285,6 +285,7 @@ const View = () => {
                     isLoading={completion.isLoading}
                     captureScreenshot={completion.captureScreenshot}
                     isScreenshotLoading={completion.isScreenshotLoading}
+                    submitScreenshots={completion.submitScreenshots}
                     disabled={!hasActiveLicense || !supportsImages}
                   />
                 </div>

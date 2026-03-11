@@ -57,6 +57,7 @@ async function* fetchBackendAIResponse(params: {
   userMessage: string;
   imagesBase64?: string[];
   history?: Message[];
+  screenshotMode?: boolean;
   provider?: string;
   model?: string;
   responseLength?: ResponseLengthId;
@@ -68,6 +69,7 @@ async function* fetchBackendAIResponse(params: {
       userMessage,
       imagesBase64 = [],
       history = [],
+      screenshotMode = false,
       provider,
       model,
       responseLength,
@@ -81,7 +83,7 @@ async function* fetchBackendAIResponse(params: {
 
     // Convert history to the expected format
     let historyString: string | undefined;
-    if (history.length > 0) {
+    if (!screenshotMode && history.length > 0) {
       // Create a copy before reversing to avoid mutating the original array
       const formattedHistory = [...history].reverse().map((msg) => ({
         role: msg.role,
@@ -107,6 +109,11 @@ async function* fetchBackendAIResponse(params: {
           invokeStartedAt
         ).toISOString()}`
       );
+      if (screenshotMode) {
+        console.debug(
+          "[stream][backend] screenshot_mode=true history_included=false system_prompt_source=screenshot_mode"
+        );
+      }
     }
 
     // Set up streaming event listeners BEFORE invoke to avoid missing early chunks.
@@ -248,6 +255,7 @@ export async function* fetchAIResponse(params: {
   history?: Message[];
   userMessage: string;
   imagesBase64?: string[];
+  screenshotMode?: boolean;
   signal?: AbortSignal;
 }): AsyncIterable<string> {
   try {
@@ -258,6 +266,7 @@ export async function* fetchAIResponse(params: {
       history = [],
       userMessage,
       imagesBase64 = [],
+      screenshotMode = false,
       signal,
     } = params;
 
@@ -279,6 +288,7 @@ export async function* fetchAIResponse(params: {
         userMessage,
         imagesBase64,
         history,
+        screenshotMode,
         responseLength,
         signal,
       });
@@ -304,6 +314,7 @@ export async function* fetchAIResponse(params: {
         userMessage,
         imagesBase64,
         history,
+        screenshotMode,
         provider: "openai",
         model: selectedModel,
         responseLength,

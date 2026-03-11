@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useApp } from "@/contexts";
+import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { MAX_FILES } from "@/config";
 import {
   fetchAIResponse,
@@ -46,11 +47,24 @@ interface ChatCompletionState {
   attachedFiles: AttachedFile[];
 }
 
+type SubmitOptions = {
+  screenshotMode?: boolean;
+  screenshotSystemPrompt?: string;
+  screenshotImagesBase64?: string[];
+};
+
+const DEFAULT_SCREENSHOT_PROMPT =
+  "Analyze these screenshots and provide clear, actionable insights.";
+const MULTI_SCREENSHOT_CONTEXT_HINT =
+  "These screenshots belong to the same question/task. Combine them into one coherent context before answering.";
+const DEFAULT_SCREENSHOT_USER_MESSAGE = "Analyze these screenshots.";
+
 export const useChatCompletion = (
   conversationId: string,
   messages: ChatConversation | null,
   setMessages: (messages: ChatConversation | null) => void
 ) => {
+  const globalShortcuts = useGlobalShortcuts();
   const {
     selectedAIProvider,
     allAiProviders,
@@ -131,8 +145,9 @@ export const useChatCompletion = (
   }, []);
 
   const submit = useCallback(
-    async (speechText?: string) => {
+    async (speechText?: string, options?: SubmitOptions) => {
       const input = speechText || state.input;
+      const isScreenshotMode = options?.screenshotMode === true;
 
       if (!input.trim()) {
         return;
@@ -159,14 +174,18 @@ export const useChatCompletion = (
 
       try {
         // Prepare message history for the AI
-        const messageHistory = (messages?.messages || []).map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }));
+        const messageHistory = isScreenshotMode
+          ? []
+          : (messages?.messages || []).map((msg) => ({
+              role: msg.role,
+              content: msg.content,
+            }));
 
         // Handle image attachments
-        const imagesBase64: string[] = [];
-        if (state.attachedFiles.length > 0) {
+        const imagesBase64: string[] = options?.screenshotImagesBase64
+          ? [...options.screenshotImagesBase64]
+          : [];
+        if (!options?.screenshotImagesBase64 && state.attachedFiles.length > 0) {
           state.attachedFiles.forEach((file) => {
             if (file.type.startsWith("image/")) {
               imagesBase64.push(file.base64);
@@ -229,10 +248,13 @@ export const useChatCompletion = (
           for await (const chunk of fetchAIResponse({
             provider: usePluelyAPI ? undefined : provider,
             selectedProvider: selectedAIProvider,
-            systemPrompt: systemPrompt || undefined,
+            systemPrompt: isScreenshotMode
+              ? options?.screenshotSystemPrompt || undefined
+              : systemPrompt || undefined,
             history: messageHistory,
             userMessage: input,
             imagesBase64,
+            screenshotMode: isScreenshotMode,
             signal,
           })) {
             // Only update if this is still the current request
@@ -436,24 +458,23 @@ export const useChatCompletion = (
 
       try {
         if (prompt) {
-          // Auto mode: Submit directly to AI with screenshot
-          const attachedFile: AttachedFile = {
-            id: Date.now().toString(),
-            name: `screenshot_${Date.now()}.png`,
-            type: "image/png",
-            base64: base64,
-            size: base64.length,
-          };
+          const screenshotUserRequest =
+            state.input.trim() || "Analyze this screenshot.";
+          const screenshotInstructionPrompt = prompt.trim();
 
-          // Store files temporarily and submit
-          setState((prev) => ({
-            ...prev,
-            attachedFiles: [...prev.attachedFiles, attachedFile],
-            input: prompt,
-          }));
-
-          // Submit with the prompt and screenshot
-          setTimeout(() => submit(prompt), 100);
+          // Submit screenshot as stateless request:
+          // - no prior history
+          // - screenshot prompt goes to systemPrompt
+          // - user message is only the user's actual request/action
+          setTimeout(
+            () =>
+              submit(screenshotUserRequest, {
+                screenshotMode: true,
+                screenshotSystemPrompt: screenshotInstructionPrompt,
+                screenshotImagesBase64: [base64],
+              }),
+            100
+          );
         } else {
           // Manual mode: Add to attached files
           const attachedFile: AttachedFile = {
@@ -481,7 +502,7 @@ export const useChatCompletion = (
         }));
       }
     },
-    [state.attachedFiles.length, submit]
+    [state.attachedFiles.length, state.input, submit]
   );
 
   const onRemoveAllFiles = () => {
@@ -489,8 +510,49 @@ export const useChatCompletion = (
     setIsFilesPopoverOpen(false);
   };
 
+  const submitScreenshots = useCallback(async () => {
+    if (state.isLoading || screenshotConfiguration.mode !== "manual") {
+      return;
+    }
+
+    const attachedImages = state.attachedFiles.filter((file) =>
+      file.type.startsWith("image/")
+    );
+    if (attachedImages.length === 0) {
+      return;
+    }
+
+    const screenshotUserRequest =
+      state.input.trim() || DEFAULT_SCREENSHOT_USER_MESSAGE;
+    const basePrompt =
+      screenshotConfiguration.autoPrompt?.trim() || DEFAULT_SCREENSHOT_PROMPT;
+    const screenshotSystemPrompt =
+      attachedImages.length > 1
+        ? `${basePrompt}\n\n${MULTI_SCREENSHOT_CONTEXT_HINT}`
+        : basePrompt;
+
+    await submit(screenshotUserRequest, {
+      screenshotMode: true,
+      screenshotSystemPrompt,
+      screenshotImagesBase64: attachedImages.map((file) => file.base64),
+    });
+  }, [
+    state.isLoading,
+    state.attachedFiles,
+    state.input,
+    screenshotConfiguration.mode,
+    screenshotConfiguration.autoPrompt,
+    submit,
+  ]);
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey
+    ) {
       e.preventDefault();
       if (!state.isLoading && state.input.trim()) {
         submit();
@@ -688,6 +750,28 @@ export const useChatCompletion = (
     };
   }, []);
 
+  useEffect(() => {
+    const shortcutActionId = "submit_screenshots";
+    globalShortcuts.registerCustomShortcutCallback(shortcutActionId, () => {
+      if (
+        screenshotConfiguration.mode === "manual" &&
+        state.attachedFiles.some((file) => file.type.startsWith("image/"))
+      ) {
+        void submitScreenshots();
+      }
+    });
+
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback(shortcutActionId);
+    };
+  }, [
+    globalShortcuts.registerCustomShortcutCallback,
+    globalShortcuts.unregisterCustomShortcutCallback,
+    screenshotConfiguration.mode,
+    state.attachedFiles,
+    submitScreenshots,
+  ]);
+
   return {
     input: state.input,
     setInput,
@@ -707,6 +791,7 @@ export const useChatCompletion = (
     screenshotConfiguration,
     setScreenshotConfiguration,
     handleScreenshotSubmit,
+    submitScreenshots,
     handleFileSelect,
     handleKeyPress,
     handlePaste,

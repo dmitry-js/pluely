@@ -79,7 +79,7 @@ export const ScreenshotConfigs = ({
               title="Processing Mode"
               description={
                 screenshotConfiguration.mode === "manual"
-                  ? "Screenshots will be captured and automatically added to your attached files. You can then submit them with your own prompt. you can capture multiple screenshots and submit them later."
+                  ? "Screenshots will be captured and added to attachments. You can capture multiple screenshots and submit them together using the configured screenshot prompt."
                   : "Screenshots will be automatically submitted to AI using your custom prompt. No manual intervention required. only one screenshot can be submitted at a time."
               }
             />
@@ -107,21 +107,20 @@ export const ScreenshotConfigs = ({
           </Select>
         </div>
 
-        {/* Auto Prompt Input - Only show when auto mode is selected */}
-        {screenshotConfiguration.mode === "auto" && (
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Auto Prompt</Label>
-            <Input
-              placeholder="Enter prompt for automatic screenshot analysis..."
-              value={screenshotConfiguration.autoPrompt}
-              onChange={(e) => handleScreenshotPromptChange(e.target.value)}
-              className="w-full h-11 border-1 border-input/50 focus:border-primary/50 transition-colors"
-            />
-            <p className="text-xs text-muted-foreground">
-              This prompt will be used automatically when screenshots are taken
-            </p>
-          </div>
-        )}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Screenshot Prompt</Label>
+          <Input
+            placeholder="Enter prompt for screenshot analysis..."
+            value={screenshotConfiguration.autoPrompt}
+            onChange={(e) => handleScreenshotPromptChange(e.target.value)}
+            className="w-full h-11 border-1 border-input/50 focus:border-primary/50 transition-colors"
+          />
+          <p className="text-xs text-muted-foreground">
+            {screenshotConfiguration.mode === "manual"
+              ? "Used by Analyze Screenshots in Manual mode."
+              : "Used automatically when screenshots are taken in Auto mode."}
+          </p>
+        </div>
       </div>
 
       {/* Tips */}

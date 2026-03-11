@@ -42,6 +42,12 @@ interface ChatConversation {
   updatedAt: number;
 }
 
+const DEFAULT_SCREENSHOT_PROMPT =
+  "Analyze these screenshots and provide clear, actionable insights.";
+const MULTI_SCREENSHOT_CONTEXT_HINT =
+  "These screenshots belong to the same question/task. Combine them into one coherent context before answering.";
+const DEFAULT_SCREENSHOT_USER_MESSAGE = "Analyze these screenshots.";
+
 interface CompletionState {
   input: string;
   response: string;
@@ -561,6 +567,9 @@ export const useCompletion = () => {
             base64: base64,
             size: base64.length,
           };
+          const screenshotInstructionPrompt = prompt.trim();
+          const screenshotUserRequest =
+            state.input.trim() || "Analyze this screenshot.";
 
           // Generate unique request ID
           const requestId = generateRequestId();
@@ -575,12 +584,6 @@ export const useCompletion = () => {
           const signal = abortControllerRef.current.signal;
 
           try {
-            // Prepare message history for the AI
-            const messageHistory = state.conversationHistory.map((msg) => ({
-              role: msg.role,
-              content: msg.content,
-            }));
-
             let fullResponse = "";
 
             const usePluelyAPI = await shouldUsePluelyAPI();
@@ -607,7 +610,7 @@ export const useCompletion = () => {
             // Clear previous response and set loading state
             setState((prev) => ({
               ...prev,
-              input: prompt,
+              input: screenshotUserRequest,
               isLoading: true,
               error: null,
               response: "",
@@ -617,10 +620,11 @@ export const useCompletion = () => {
             for await (const chunk of fetchAIResponse({
               provider: usePluelyAPI ? undefined : provider,
               selectedProvider: selectedAIProvider,
-              systemPrompt: systemPrompt || undefined,
-              history: messageHistory,
-              userMessage: prompt,
+              systemPrompt: screenshotInstructionPrompt || undefined,
+              history: [],
+              userMessage: screenshotUserRequest,
               imagesBase64: [base64],
+              screenshotMode: true,
               signal,
             })) {
               // Only update if this is still the current request
@@ -649,7 +653,7 @@ export const useCompletion = () => {
 
             // Save the conversation after successful completion
             if (fullResponse) {
-              await saveCurrentConversation(prompt, fullResponse, [
+              await saveCurrentConversation(screenshotUserRequest, fullResponse, [
                 attachedFile,
               ]);
               // Clear input after saving
@@ -715,8 +719,138 @@ export const useCompletion = () => {
     setIsFilesPopoverOpen(false);
   };
 
+  const submitScreenshots = useCallback(async () => {
+    if (state.isLoading || screenshotConfiguration.mode !== "manual") {
+      return;
+    }
+
+    const attachedImages = state.attachedFiles.filter((file) =>
+      file.type.startsWith("image/")
+    );
+    if (attachedImages.length === 0) {
+      return;
+    }
+
+    const screenshotUserRequest =
+      state.input.trim() || DEFAULT_SCREENSHOT_USER_MESSAGE;
+    const basePrompt =
+      screenshotConfiguration.autoPrompt?.trim() || DEFAULT_SCREENSHOT_PROMPT;
+    const screenshotSystemPrompt =
+      attachedImages.length > 1
+        ? `${basePrompt}\n\n${MULTI_SCREENSHOT_CONTEXT_HINT}`
+        : basePrompt;
+
+    const requestId = generateRequestId();
+    currentRequestIdRef.current = requestId;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+    const imagesBase64 = attachedImages.map((file) => file.base64);
+
+    try {
+      const usePluelyAPI = await shouldUsePluelyAPI();
+      if (!selectedAIProvider.provider && !usePluelyAPI) {
+        setState((prev) => ({
+          ...prev,
+          error: "Please select an AI provider in settings",
+        }));
+        return;
+      }
+
+      const provider = allAiProviders.find(
+        (p) => p.id === selectedAIProvider.provider
+      );
+      if (!provider && !usePluelyAPI) {
+        setState((prev) => ({
+          ...prev,
+          error: "Invalid provider selected",
+        }));
+        return;
+      }
+
+      let fullResponse = "";
+      setState((prev) => ({
+        ...prev,
+        input: screenshotUserRequest,
+        isLoading: true,
+        error: null,
+        response: "",
+      }));
+
+      for await (const chunk of fetchAIResponse({
+        provider: usePluelyAPI ? undefined : provider,
+        selectedProvider: selectedAIProvider,
+        systemPrompt: screenshotSystemPrompt,
+        history: [],
+        userMessage: screenshotUserRequest,
+        imagesBase64,
+        screenshotMode: true,
+        signal,
+      })) {
+        if (currentRequestIdRef.current !== requestId || signal.aborted) {
+          return;
+        }
+
+        fullResponse += chunk;
+        setState((prev) => ({
+          ...prev,
+          response: prev.response + chunk,
+        }));
+      }
+
+      if (currentRequestIdRef.current !== requestId || signal.aborted) {
+        return;
+      }
+
+      setState((prev) => ({ ...prev, isLoading: false }));
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+
+      if (fullResponse) {
+        await saveCurrentConversation(
+          screenshotUserRequest,
+          fullResponse,
+          attachedImages
+        );
+        setState((prev) => ({
+          ...prev,
+          input: "",
+          attachedFiles: [],
+        }));
+      }
+    } catch (e: any) {
+      if (currentRequestIdRef.current === requestId && !signal.aborted) {
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: e.message || "An error occurred",
+        }));
+      }
+    }
+  }, [
+    state.isLoading,
+    state.attachedFiles,
+    state.input,
+    screenshotConfiguration.mode,
+    screenshotConfiguration.autoPrompt,
+    selectedAIProvider,
+    allAiProviders,
+    saveCurrentConversation,
+  ]);
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey
+    ) {
       e.preventDefault();
       if (!state.isLoading && state.input.trim()) {
         submit();
@@ -1005,6 +1139,28 @@ export const useCompletion = () => {
     inputRef,
   ]);
 
+  useEffect(() => {
+    const shortcutActionId = "submit_screenshots";
+    globalShortcuts.registerCustomShortcutCallback(shortcutActionId, () => {
+      if (
+        screenshotConfiguration.mode === "manual" &&
+        state.attachedFiles.some((file) => file.type.startsWith("image/"))
+      ) {
+        void submitScreenshots();
+      }
+    });
+
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback(shortcutActionId);
+    };
+  }, [
+    globalShortcuts.registerCustomShortcutCallback,
+    globalShortcuts.unregisterCustomShortcutCallback,
+    screenshotConfiguration.mode,
+    state.attachedFiles,
+    submitScreenshots,
+  ]);
+
   return {
     input: state.input,
     setInput,
@@ -1033,6 +1189,7 @@ export const useCompletion = () => {
     screenshotConfiguration,
     setScreenshotConfiguration,
     handleScreenshotSubmit,
+    submitScreenshots,
     handleFileSelect,
     handleKeyPress,
     handlePaste,

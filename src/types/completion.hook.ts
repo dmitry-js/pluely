@@ -96,6 +96,8 @@ export interface UseCompletionReturn {
   setScreenshotConfiguration: Dispatch<SetStateAction<any>>;
   /** Function to handle screenshot submission with optional prompt */
   handleScreenshotSubmit: (base64: string, prompt?: string) => Promise<void>;
+  /** Function to analyze currently attached screenshots/images */
+  submitScreenshots: () => Promise<void>;
 
   // File selection and keyboard handling
   /** Event handler for file input changes */

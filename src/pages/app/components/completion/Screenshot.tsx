@@ -1,5 +1,10 @@
 import { Button } from "@/components";
-import { LaptopMinimalIcon, Loader2, MousePointer2Icon } from "lucide-react";
+import {
+  LaptopMinimalIcon,
+  Loader2,
+  MousePointer2Icon,
+  ScanSearchIcon,
+} from "lucide-react";
 import { UseCompletionReturn } from "@/types";
 import { MAX_FILES } from "@/config";
 import { useApp } from "@/contexts";
@@ -10,6 +15,7 @@ export const Screenshot = ({
   isLoading,
   captureScreenshot,
   isScreenshotLoading,
+  submitScreenshots,
 }: UseCompletionReturn) => {
   const { supportsImages } = useApp();
   const captureMode = screenshotConfiguration.enabled
@@ -22,26 +28,46 @@ export const Screenshot = ({
     isLoading ||
     isScreenshotLoading ||
     !supportsImages;
+  const hasImageAttachments = attachedFiles.some((file) =>
+    file.type.startsWith("image/")
+  );
+  const isAnalyzeDisabled =
+    isLoading ||
+    isScreenshotLoading ||
+    !supportsImages ||
+    screenshotConfiguration.mode !== "manual" ||
+    !hasImageAttachments;
 
   return (
-    <Button
-      size="icon"
-      className="cursor-pointer"
-      title={
-        !supportsImages
-          ? "Screenshot not supported by current AI provider"
-          : `${captureMode} mode (${processingMode}) - ${attachedFiles.length}/${MAX_FILES} files`
-      }
-      onClick={captureScreenshot}
-      disabled={isDisabled}
-    >
-      {isScreenshotLoading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : screenshotConfiguration.enabled ? (
-        <LaptopMinimalIcon className="h-4 w-4" />
-      ) : (
-        <MousePointer2Icon className="h-4 w-4" />
-      )}
-    </Button>
+    <div className="flex items-center gap-1">
+      <Button
+        size="icon"
+        className="cursor-pointer"
+        title={
+          !supportsImages
+            ? "Screenshot not supported by current AI provider"
+            : `${captureMode} mode (${processingMode}) - ${attachedFiles.length}/${MAX_FILES} files`
+        }
+        onClick={captureScreenshot}
+        disabled={isDisabled}
+      >
+        {isScreenshotLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : screenshotConfiguration.enabled ? (
+          <LaptopMinimalIcon className="h-4 w-4" />
+        ) : (
+          <MousePointer2Icon className="h-4 w-4" />
+        )}
+      </Button>
+      <Button
+        size="icon"
+        className="cursor-pointer"
+        title="Analyze screenshots"
+        onClick={() => void submitScreenshots()}
+        disabled={isAnalyzeDisabled}
+      >
+        <ScanSearchIcon className="h-4 w-4" />
+      </Button>
+    </div>
   );
 };

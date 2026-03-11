@@ -71,4 +71,15 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
       linux: "ctrl+shift+s",
     },
   },
+  {
+    id: "submit_screenshots",
+    name: "Analyze Screenshots",
+    description:
+      "Submit attached screenshots to AI using the configured screenshot prompt",
+    defaultKey: {
+      macos: "cmd+enter",
+      windows: "ctrl+enter",
+      linux: "ctrl+enter",
+    },
+  },
 ];
