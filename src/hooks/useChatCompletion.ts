@@ -15,6 +15,8 @@ import {
 } from "@/lib";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // Types for completion
 interface AttachedFile {
@@ -58,6 +60,8 @@ const DEFAULT_SCREENSHOT_PROMPT =
 const MULTI_SCREENSHOT_CONTEXT_HINT =
   "These screenshots belong to the same question/task. Combine them into one coherent context before answering.";
 const DEFAULT_SCREENSHOT_USER_MESSAGE = "Analyze these screenshots.";
+const SCREENSHOT_CAPTURE_HIDE_DELAY_MS = 150;
+const SCREENSHOT_RESTORE_POSITION_DELAY_MS = 50;
 
 export const useChatCompletion = (
   conversationId: string,
@@ -94,6 +98,7 @@ export const useChatCompletion = (
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
   const isProcessingScreenshotRef = useRef(false);
+  const isCaptureInProgressRef = useRef(false);
   const screenshotConfigRef = useRef(screenshotConfiguration);
   const hasCheckedPermissionRef = useRef(false);
   const screenshotInitiatedByThisContext = useRef(false);
@@ -448,6 +453,20 @@ export const useChatCompletion = (
 
   const handleScreenshotSubmit = useCallback(
     async (base64: string, prompt?: string) => {
+      // DEBUG: screenshot tracing
+      console.debug("[screenshot] handleScreenshotSubmit start", {
+        mode: screenshotConfiguration.mode,
+        hasBase64: !!base64,
+        base64Length: typeof base64 === "string" ? base64.length : "n/a",
+        prompt,
+        attachedFilesBefore: state.attachedFiles.length,
+      });
+
+      if (!base64 || typeof base64 !== "string" || base64.length === 0) {
+        console.warn("Skipping screenshot because capture returned empty data");
+        return;
+      }
+
       if (state.attachedFiles.length >= MAX_FILES) {
         setState((prev) => ({
           ...prev,
@@ -458,9 +477,20 @@ export const useChatCompletion = (
 
       try {
         if (prompt) {
+          // DEBUG: screenshot tracing
+          console.debug("[screenshot] handleScreenshotSubmit branch", {
+            mode: screenshotConfiguration.mode,
+            auto: true,
+            manual: false,
+          });
           const screenshotUserRequest =
             state.input.trim() || "Analyze this screenshot.";
           const screenshotInstructionPrompt = prompt.trim();
+          // DEBUG: screenshot tracing
+          console.debug("[screenshot] auto mode submit start", {
+            prompt,
+            base64Length: typeof base64 === "string" ? base64.length : "n/a",
+          });
 
           // Submit screenshot as stateless request:
           // - no prior history
@@ -476,7 +506,18 @@ export const useChatCompletion = (
             100
           );
         } else {
+          // DEBUG: screenshot tracing
+          console.debug("[screenshot] handleScreenshotSubmit branch", {
+            mode: screenshotConfiguration.mode,
+            auto: false,
+            manual: true,
+          });
           // Manual mode: Add to attached files
+          // DEBUG: screenshot tracing
+          console.debug("[screenshot] adding screenshot to attachments", {
+            attachedFilesBefore: state.attachedFiles.length,
+          });
+          const nextCount = state.attachedFiles.length + 1;
           const attachedFile: AttachedFile = {
             id: Date.now().toString(),
             name: `screenshot_${Date.now()}.png`,
@@ -489,6 +530,11 @@ export const useChatCompletion = (
             ...prev,
             attachedFiles: [...prev.attachedFiles, attachedFile],
           }));
+          // DEBUG: screenshot tracing
+          console.debug(
+            "[screenshot] attachments after add (expected)",
+            nextCount
+          );
         }
       } catch (error) {
         console.error("Failed to process screenshot:", error);
@@ -595,10 +641,111 @@ export const useChatCompletion = (
     [state.attachedFiles.length, addFile]
   );
 
+  const captureWithoutOverlay = useCallback(async () => {
+    const win = getCurrentWindow();
+    let shouldRestoreWindow = false;
+    let savedPosition: { x: number; y: number } | null = null;
+    console.debug("[screenshot] capture start");
+
+    try {
+      const position = await win.outerPosition();
+      savedPosition = { x: position.x, y: position.y };
+      console.debug("[screenshot] saved position before hide", savedPosition);
+    } catch (error) {
+      console.warn("Failed to read window position before screenshot capture:", error);
+    }
+
+    try {
+      await win.hide();
+      shouldRestoreWindow = true;
+    } catch (error) {
+      console.warn("Failed to hide window before screenshot capture:", error);
+    }
+
+    try {
+      if (shouldRestoreWindow) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, SCREENSHOT_CAPTURE_HIDE_DELAY_MS)
+        );
+      }
+
+      let base64 = await invoke<string>("capture_to_base64");
+      if (!base64 || typeof base64 !== "string" || base64.length === 0) {
+        console.warn(
+          "[screenshot] hidden capture failed, retrying without overlay hide"
+        );
+
+        try {
+          await win.show();
+        } catch {}
+
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        base64 = await invoke<string>("capture_to_base64");
+      }
+
+      if (!base64 || typeof base64 !== "string" || base64.length === 0) {
+        console.warn("[screenshot] capture failed: empty image data");
+        return null;
+      }
+
+      console.debug("[screenshot] capture success", base64.length);
+      return base64;
+    } finally {
+      if (shouldRestoreWindow) {
+        try {
+          await win.show();
+        } catch (error) {
+          console.warn(
+            "Failed to restore window visibility after capture:",
+            error
+          );
+        }
+
+        if (savedPosition) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, SCREENSHOT_RESTORE_POSITION_DELAY_MS)
+          );
+
+          try {
+            await win.setPosition(
+              new PhysicalPosition(savedPosition.x, savedPosition.y)
+            );
+            console.debug("[screenshot] restored position after show", savedPosition);
+          } catch (error) {
+            console.warn("Failed to restore window position after capture:", error);
+          }
+        }
+
+        try {
+          await win.setFocus();
+        } catch (error) {
+          console.warn("Failed to restore window focus after capture:", error);
+        }
+      }
+    }
+  }, []);
+
   const captureScreenshot = useCallback(async () => {
-    if (!handleScreenshotSubmit) return;
+    // DEBUG: screenshot tracing
+    console.debug("[screenshot] captureScreenshot called");
+    if (
+      !handleScreenshotSubmit ||
+      isScreenshotLoading ||
+      isProcessingScreenshotRef.current ||
+      isCaptureInProgressRef.current
+    ) {
+      // DEBUG: screenshot tracing
+      console.debug("[screenshot] capture aborted", {
+        handleScreenshotSubmit: !!handleScreenshotSubmit,
+        isScreenshotLoading,
+        isProcessingScreenshot: isProcessingScreenshotRef.current,
+        isCaptureInProgress: isCaptureInProgressRef.current,
+      });
+      return;
+    }
 
     const config = screenshotConfigRef.current;
+    isCaptureInProgressRef.current = true;
 
     // Mark that this context initiated the screenshot
     screenshotInitiatedByThisContext.current = true;
@@ -640,14 +787,24 @@ export const useChatCompletion = (
       }
 
       if (config.enabled) {
-        const base64 = await invoke("capture_to_base64");
+        const base64 = await captureWithoutOverlay();
+        // DEBUG: screenshot tracing
+        console.debug("[screenshot] captureScreenshot received base64", {
+          hasBase64: !!base64,
+          base64Length: typeof base64 === "string" ? base64.length : "n/a",
+          mode: config.mode,
+        });
+        if (!base64) {
+          screenshotInitiatedByThisContext.current = false;
+          return;
+        }
 
         if (config.mode === "auto") {
           // Auto mode: Submit directly to AI with the configured prompt
-          await handleScreenshotSubmit(base64 as string, config.autoPrompt);
+          await handleScreenshotSubmit(base64, config.autoPrompt);
         } else if (config.mode === "manual") {
           // Manual mode: Add to attached files without prompt
-          await handleScreenshotSubmit(base64 as string);
+          await handleScreenshotSubmit(base64);
         }
         // Reset flag after processing
         screenshotInitiatedByThisContext.current = false;
@@ -674,11 +831,17 @@ export const useChatCompletion = (
       isProcessingScreenshotRef.current = false;
       screenshotInitiatedByThisContext.current = false;
     } finally {
+      isCaptureInProgressRef.current = false;
       if (config.enabled) {
         setIsScreenshotLoading(false);
       }
     }
-  }, [handleScreenshotSubmit, hasActiveLicense]);
+  }, [
+    captureWithoutOverlay,
+    handleScreenshotSubmit,
+    hasActiveLicense,
+    isScreenshotLoading,
+  ]);
 
   useEffect(() => {
     let unlisten: any;

@@ -41,6 +41,19 @@ export const ChatScreenshot = ({
     disabled ||
     screenshotConfiguration.mode !== "manual" ||
     !hasImageAttachments;
+  const isCaptureDisabled =
+    attachedFiles.length >= MAX_FILES ||
+    isLoading ||
+    isScreenshotLoading ||
+    disabled;
+  // DEBUG: screenshot tracing
+  console.debug("[screenshot] button state", {
+    isLoading,
+    isScreenshotLoading,
+    supportsImages,
+    attachedFilesCount: attachedFiles.length,
+    disabled: isCaptureDisabled,
+  });
 
   return (
     <div className="flex items-center gap-1">
@@ -53,13 +66,12 @@ export const ChatScreenshot = ({
             ? "Screenshot not supported by current AI provider"
             : `${captureMode} mode (${processingMode}) - ${attachedFiles.length}/${MAX_FILES} files`
         }
-        onClick={captureScreenshot}
-        disabled={
-          attachedFiles.length >= MAX_FILES ||
-          isLoading ||
-          isScreenshotLoading ||
-          disabled
-        }
+        onClick={() => {
+          // DEBUG: screenshot tracing
+          console.debug("[screenshot] button clicked");
+          void captureScreenshot();
+        }}
+        disabled={isCaptureDisabled}
       >
         {isScreenshotLoading ? (
           <Loader2 className="size-3 lg:size-4 animate-spin" />

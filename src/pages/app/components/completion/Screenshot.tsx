@@ -37,6 +37,14 @@ export const Screenshot = ({
     !supportsImages ||
     screenshotConfiguration.mode !== "manual" ||
     !hasImageAttachments;
+  // DEBUG: screenshot tracing
+  console.debug("[screenshot] button state", {
+    isLoading,
+    isScreenshotLoading,
+    supportsImages,
+    attachedFilesCount: attachedFiles.length,
+    disabled: isDisabled,
+  });
 
   return (
     <div className="flex items-center gap-1">
@@ -48,7 +56,11 @@ export const Screenshot = ({
             ? "Screenshot not supported by current AI provider"
             : `${captureMode} mode (${processingMode}) - ${attachedFiles.length}/${MAX_FILES} files`
         }
-        onClick={captureScreenshot}
+        onClick={() => {
+          // DEBUG: screenshot tracing
+          console.debug("[screenshot] button clicked");
+          void captureScreenshot();
+        }}
         disabled={isDisabled}
       >
         {isScreenshotLoading ? (
