@@ -8,6 +8,7 @@ import {
 import { UseCompletionReturn } from "@/types";
 import { MAX_FILES } from "@/config";
 import { useApp } from "@/contexts";
+import { logScreenshotDebug } from "@/lib/utils";
 
 export const Screenshot = ({
   screenshotConfiguration,
@@ -38,7 +39,7 @@ export const Screenshot = ({
     screenshotConfiguration.mode !== "manual" ||
     !hasImageAttachments;
   // DEBUG: screenshot tracing
-  console.debug("[screenshot] button state", {
+  logScreenshotDebug("[screenshot] button state", {
     isLoading,
     isScreenshotLoading,
     supportsImages,
@@ -58,7 +59,7 @@ export const Screenshot = ({
         }
         onClick={() => {
           // DEBUG: screenshot tracing
-          console.debug("[screenshot] button clicked");
+          logScreenshotDebug("[screenshot] button clicked");
           void captureScreenshot();
         }}
         disabled={isDisabled}

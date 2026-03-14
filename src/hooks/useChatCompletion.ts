@@ -17,6 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { logScreenshotDebug } from "@/lib/utils";
 
 // Types for completion
 interface AttachedFile {
@@ -454,7 +455,7 @@ export const useChatCompletion = (
   const handleScreenshotSubmit = useCallback(
     async (base64: string, prompt?: string) => {
       // DEBUG: screenshot tracing
-      console.debug("[screenshot] handleScreenshotSubmit start", {
+      logScreenshotDebug("[screenshot] handleScreenshotSubmit start", {
         mode: screenshotConfiguration.mode,
         hasBase64: !!base64,
         base64Length: typeof base64 === "string" ? base64.length : "n/a",
@@ -478,7 +479,7 @@ export const useChatCompletion = (
       try {
         if (prompt) {
           // DEBUG: screenshot tracing
-          console.debug("[screenshot] handleScreenshotSubmit branch", {
+          logScreenshotDebug("[screenshot] handleScreenshotSubmit branch", {
             mode: screenshotConfiguration.mode,
             auto: true,
             manual: false,
@@ -487,7 +488,7 @@ export const useChatCompletion = (
             state.input.trim() || "Analyze this screenshot.";
           const screenshotInstructionPrompt = prompt.trim();
           // DEBUG: screenshot tracing
-          console.debug("[screenshot] auto mode submit start", {
+          logScreenshotDebug("[screenshot] auto mode submit start", {
             prompt,
             base64Length: typeof base64 === "string" ? base64.length : "n/a",
           });
@@ -507,14 +508,14 @@ export const useChatCompletion = (
           );
         } else {
           // DEBUG: screenshot tracing
-          console.debug("[screenshot] handleScreenshotSubmit branch", {
+          logScreenshotDebug("[screenshot] handleScreenshotSubmit branch", {
             mode: screenshotConfiguration.mode,
             auto: false,
             manual: true,
           });
           // Manual mode: Add to attached files
           // DEBUG: screenshot tracing
-          console.debug("[screenshot] adding screenshot to attachments", {
+          logScreenshotDebug("[screenshot] adding screenshot to attachments", {
             attachedFilesBefore: state.attachedFiles.length,
           });
           const nextCount = state.attachedFiles.length + 1;
@@ -531,7 +532,7 @@ export const useChatCompletion = (
             attachedFiles: [...prev.attachedFiles, attachedFile],
           }));
           // DEBUG: screenshot tracing
-          console.debug(
+          logScreenshotDebug(
             "[screenshot] attachments after add (expected)",
             nextCount
           );
@@ -645,12 +646,12 @@ export const useChatCompletion = (
     const win = getCurrentWindow();
     let shouldRestoreWindow = false;
     let savedPosition: { x: number; y: number } | null = null;
-    console.debug("[screenshot] capture start");
+    logScreenshotDebug("[screenshot] capture start");
 
     try {
       const position = await win.outerPosition();
       savedPosition = { x: position.x, y: position.y };
-      console.debug("[screenshot] saved position before hide", savedPosition);
+      logScreenshotDebug("[screenshot] saved position before hide", savedPosition);
     } catch (error) {
       console.warn("Failed to read window position before screenshot capture:", error);
     }
@@ -688,7 +689,7 @@ export const useChatCompletion = (
         return null;
       }
 
-      console.debug("[screenshot] capture success", base64.length);
+      logScreenshotDebug("[screenshot] capture success", base64.length);
       return base64;
     } finally {
       if (shouldRestoreWindow) {
@@ -710,7 +711,10 @@ export const useChatCompletion = (
             await win.setPosition(
               new PhysicalPosition(savedPosition.x, savedPosition.y)
             );
-            console.debug("[screenshot] restored position after show", savedPosition);
+            logScreenshotDebug(
+              "[screenshot] restored position after show",
+              savedPosition
+            );
           } catch (error) {
             console.warn("Failed to restore window position after capture:", error);
           }
@@ -727,7 +731,7 @@ export const useChatCompletion = (
 
   const captureScreenshot = useCallback(async () => {
     // DEBUG: screenshot tracing
-    console.debug("[screenshot] captureScreenshot called");
+    logScreenshotDebug("[screenshot] captureScreenshot called");
     if (
       !handleScreenshotSubmit ||
       isScreenshotLoading ||
@@ -735,7 +739,7 @@ export const useChatCompletion = (
       isCaptureInProgressRef.current
     ) {
       // DEBUG: screenshot tracing
-      console.debug("[screenshot] capture aborted", {
+      logScreenshotDebug("[screenshot] capture aborted", {
         handleScreenshotSubmit: !!handleScreenshotSubmit,
         isScreenshotLoading,
         isProcessingScreenshot: isProcessingScreenshotRef.current,
@@ -789,7 +793,7 @@ export const useChatCompletion = (
       if (config.enabled) {
         const base64 = await captureWithoutOverlay();
         // DEBUG: screenshot tracing
-        console.debug("[screenshot] captureScreenshot received base64", {
+        logScreenshotDebug("[screenshot] captureScreenshot received base64", {
           hasBase64: !!base64,
           base64Length: typeof base64 === "string" ? base64.length : "n/a",
           mode: config.mode,

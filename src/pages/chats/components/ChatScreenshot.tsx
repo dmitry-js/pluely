@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { MAX_FILES } from "@/config";
 import { useApp } from "@/contexts";
+import { logScreenshotDebug } from "@/lib/utils";
 
 interface ChatScreenshotProps {
   screenshotConfiguration: any;
@@ -47,7 +48,7 @@ export const ChatScreenshot = ({
     isScreenshotLoading ||
     disabled;
   // DEBUG: screenshot tracing
-  console.debug("[screenshot] button state", {
+  logScreenshotDebug("[screenshot] button state", {
     isLoading,
     isScreenshotLoading,
     supportsImages,
@@ -68,7 +69,7 @@ export const ChatScreenshot = ({
         }
         onClick={() => {
           // DEBUG: screenshot tracing
-          console.debug("[screenshot] button clicked");
+          logScreenshotDebug("[screenshot] button clicked");
           void captureScreenshot();
         }}
         disabled={isCaptureDisabled}

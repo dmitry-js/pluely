@@ -5,6 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const SCREENSHOT_DEBUG =
+  import.meta.env.DEV && import.meta.env.VITE_SCREENSHOT_DEBUG === "true";
+
+export const logScreenshotDebug = (...args: unknown[]) => {
+  if (SCREENSHOT_DEBUG) {
+    console.debug(...args);
+  }
+};
+
 export const floatArrayToWav = (
   audioData: Float32Array,
   sampleRate: number = 16000,
