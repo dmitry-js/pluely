@@ -13,10 +13,12 @@ import {
   generateRequestId,
   getResponseSettings,
 } from "@/lib";
+import {
+  buildScreenshotRequest,
+  captureWithoutOverlay,
+} from "@/lib/screenshot";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { PhysicalPosition } from "@tauri-apps/api/dpi";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { logScreenshotDebug } from "@/lib/utils";
 
 // Types for completion
@@ -55,14 +57,6 @@ type SubmitOptions = {
   screenshotSystemPrompt?: string;
   screenshotImagesBase64?: string[];
 };
-
-const DEFAULT_SCREENSHOT_PROMPT =
-  "Analyze these screenshots and provide clear, actionable insights.";
-const MULTI_SCREENSHOT_CONTEXT_HINT =
-  "These screenshots belong to the same question/task. Combine them into one coherent context before answering.";
-const DEFAULT_SCREENSHOT_USER_MESSAGE = "Analyze these screenshots.";
-const SCREENSHOT_CAPTURE_HIDE_DELAY_MS = 150;
-const SCREENSHOT_RESTORE_POSITION_DELAY_MS = 50;
 
 export const useChatCompletion = (
   conversationId: string,
@@ -562,33 +556,25 @@ export const useChatCompletion = (
       return;
     }
 
-    const attachedImages = state.attachedFiles.filter((file) =>
-      file.type.startsWith("image/")
-    );
-    if (attachedImages.length === 0) {
+    const screenshotRequest = buildScreenshotRequest({
+      input: state.input,
+      attachedFiles: state.attachedFiles,
+      screenshotConfiguration,
+    });
+    if (!screenshotRequest) {
       return;
     }
 
-    const screenshotUserRequest =
-      state.input.trim() || DEFAULT_SCREENSHOT_USER_MESSAGE;
-    const basePrompt =
-      screenshotConfiguration.autoPrompt?.trim() || DEFAULT_SCREENSHOT_PROMPT;
-    const screenshotSystemPrompt =
-      attachedImages.length > 1
-        ? `${basePrompt}\n\n${MULTI_SCREENSHOT_CONTEXT_HINT}`
-        : basePrompt;
-
-    await submit(screenshotUserRequest, {
-      screenshotMode: true,
-      screenshotSystemPrompt,
-      screenshotImagesBase64: attachedImages.map((file) => file.base64),
+    await submit(screenshotRequest.userMessage, {
+      screenshotMode: screenshotRequest.screenshotMode,
+      screenshotSystemPrompt: screenshotRequest.systemPrompt,
+      screenshotImagesBase64: screenshotRequest.imagesBase64,
     });
   }, [
     state.isLoading,
     state.attachedFiles,
     state.input,
-    screenshotConfiguration.mode,
-    screenshotConfiguration.autoPrompt,
+    screenshotConfiguration,
     submit,
   ]);
 
@@ -641,93 +627,6 @@ export const useChatCompletion = (
     },
     [state.attachedFiles.length, addFile]
   );
-
-  const captureWithoutOverlay = useCallback(async () => {
-    const win = getCurrentWindow();
-    let shouldRestoreWindow = false;
-    let savedPosition: { x: number; y: number } | null = null;
-    logScreenshotDebug("[screenshot] capture start");
-
-    try {
-      const position = await win.outerPosition();
-      savedPosition = { x: position.x, y: position.y };
-      logScreenshotDebug("[screenshot] saved position before hide", savedPosition);
-    } catch (error) {
-      console.warn("Failed to read window position before screenshot capture:", error);
-    }
-
-    try {
-      await win.hide();
-      shouldRestoreWindow = true;
-    } catch (error) {
-      console.warn("Failed to hide window before screenshot capture:", error);
-    }
-
-    try {
-      if (shouldRestoreWindow) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, SCREENSHOT_CAPTURE_HIDE_DELAY_MS)
-        );
-      }
-
-      let base64 = await invoke<string>("capture_to_base64");
-      if (!base64 || typeof base64 !== "string" || base64.length === 0) {
-        console.warn(
-          "[screenshot] hidden capture failed, retrying without overlay hide"
-        );
-
-        try {
-          await win.show();
-        } catch {}
-
-        await new Promise((resolve) => setTimeout(resolve, 80));
-        base64 = await invoke<string>("capture_to_base64");
-      }
-
-      if (!base64 || typeof base64 !== "string" || base64.length === 0) {
-        console.warn("[screenshot] capture failed: empty image data");
-        return null;
-      }
-
-      logScreenshotDebug("[screenshot] capture success", base64.length);
-      return base64;
-    } finally {
-      if (shouldRestoreWindow) {
-        try {
-          await win.show();
-        } catch (error) {
-          console.warn(
-            "Failed to restore window visibility after capture:",
-            error
-          );
-        }
-
-        if (savedPosition) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, SCREENSHOT_RESTORE_POSITION_DELAY_MS)
-          );
-
-          try {
-            await win.setPosition(
-              new PhysicalPosition(savedPosition.x, savedPosition.y)
-            );
-            logScreenshotDebug(
-              "[screenshot] restored position after show",
-              savedPosition
-            );
-          } catch (error) {
-            console.warn("Failed to restore window position after capture:", error);
-          }
-        }
-
-        try {
-          await win.setFocus();
-        } catch (error) {
-          console.warn("Failed to restore window focus after capture:", error);
-        }
-      }
-    }
-  }, []);
 
   const captureScreenshot = useCallback(async () => {
     // DEBUG: screenshot tracing
