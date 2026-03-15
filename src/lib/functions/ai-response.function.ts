@@ -16,6 +16,9 @@ import { MARKDOWN_FORMATTING_INSTRUCTIONS } from "@/config/constants";
 
 type ResponseLengthId = "short" | "medium" | "auto";
 
+const SCREENSHOT_SHORT_MODE_CODING_OVERRIDE_PROMPT =
+  "IMPORTANT FOR SCREENSHOT TASKS: If the screenshot contains a coding task, do not keep the answer ultra-short. First briefly explain the solution or approach. Then provide the complete final code. Include short explanatory comments where useful. Do not return partial code. Prioritize completeness over extreme brevity. For non-coding screenshot tasks, you may still stay concise.";
+
 function normalizeResponseLength(value?: string): ResponseLengthId {
   if (value === "short" || value === "medium" || value === "auto") {
     return value;
@@ -23,7 +26,10 @@ function normalizeResponseLength(value?: string): ResponseLengthId {
   return "short";
 }
 
-function buildEnhancedSystemPrompt(baseSystemPrompt?: string): string {
+function buildEnhancedSystemPrompt(
+  baseSystemPrompt?: string,
+  options?: { screenshotMode?: boolean }
+): string {
   const responseSettings = getResponseSettings();
   const prompts: string[] = [];
 
@@ -36,6 +42,13 @@ function buildEnhancedSystemPrompt(baseSystemPrompt?: string): string {
   );
   if (lengthOption?.prompt?.trim()) {
     prompts.push(lengthOption.prompt);
+  }
+
+  if (
+    options?.screenshotMode &&
+    responseSettings.responseLength === "short"
+  ) {
+    prompts.push(SCREENSHOT_SHORT_MODE_CODING_OVERRIDE_PROMPT);
   }
 
   const languageOption = LANGUAGES.find(
@@ -276,7 +289,9 @@ export async function* fetchAIResponse(params: {
       return;
     }
 
-    const enhancedSystemPrompt = buildEnhancedSystemPrompt(systemPrompt);
+    const enhancedSystemPrompt = buildEnhancedSystemPrompt(systemPrompt, {
+      screenshotMode,
+    });
     const responseLength = normalizeResponseLength(
       getResponseSettings().responseLength
     );
