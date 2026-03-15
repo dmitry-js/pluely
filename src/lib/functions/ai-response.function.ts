@@ -183,6 +183,7 @@ async function* fetchBackendAIResponse(params: {
         provider,
         model,
         responseLength,
+        screenshotMode,
       })
         .catch((error) => {
           invokeError = error;

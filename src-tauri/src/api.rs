@@ -16,6 +16,7 @@ const OPENAI_USER_HISTORY_LIMIT: usize = 3;
 const OPENAI_WARMUP_DEFAULT_MODEL: &str = "gpt-5-nano-2025-08-07";
 const OPENAI_WARMUP_MAX_OUTPUT_TOKENS: i64 = 16;
 const OPENAI_SHORT_MAX_OUTPUT_TOKENS: i64 = 200;
+const OPENAI_SHORT_SCREENSHOT_MAX_OUTPUT_TOKENS: i64 = 800;
 const OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS: i64 = 450;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
@@ -901,8 +902,10 @@ pub async fn chat_stream_response(
     provider: Option<String>,
     model: Option<String>,
     response_length: Option<String>,
+    screenshot_mode: Option<bool>,
 ) -> Result<String, String> {
     OPENAI_CHAT_REQUEST_STARTED.store(true, Ordering::SeqCst);
+    let screenshot_mode = screenshot_mode.unwrap_or(false);
     let user_message_code_intent = has_code_intent(&user_message);
     let requested_provider = provider.clone().map(|value| value.to_lowercase());
     let requested_model = model.clone();
@@ -1099,8 +1102,12 @@ pub async fn chat_stream_response(
     let mut request_body = if is_openai_responses {
         let selected_length = openai_response_length.as_deref().unwrap_or("short");
         let mut short_mode_max_tokens = OPENAI_SHORT_MAX_OUTPUT_TOKENS;
-        if selected_length == "short" && user_message_code_intent {
-            short_mode_max_tokens = OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS;
+        if selected_length == "short" {
+            if screenshot_mode {
+                short_mode_max_tokens = OPENAI_SHORT_SCREENSHOT_MAX_OUTPUT_TOKENS;
+            } else if user_message_code_intent {
+                short_mode_max_tokens = OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS;
+            }
         }
         let (max_output_tokens, reasoning_effort): (Option<i64>, &str) = match selected_length {
             "short" => (Some(short_mode_max_tokens), "minimal"),
@@ -1195,8 +1202,12 @@ pub async fn chat_stream_response(
             "n/a".to_string()
         };
         eprintln!(
-            "chat_stream_response openai response controls: response_length={}, code_intent={}, max_output_tokens={}, reasoning_effort={}",
-            selected_length, code_intent_log, max_output_tokens_log, reasoning_effort_log
+            "chat_stream_response openai response controls: response_length={}, screenshot_mode={}, code_intent={}, max_output_tokens={}, reasoning_effort={}",
+            selected_length,
+            screenshot_mode,
+            code_intent_log,
+            max_output_tokens_log,
+            reasoning_effort_log
         );
     }
 
