@@ -12,8 +12,21 @@ export const captureWithoutOverlay = async (): Promise<string | null> => {
   const win = getCurrentWindow();
   let shouldRestoreWindow = false;
   let savedPosition: { x: number; y: number } | null = null;
+  let wasVisibleBeforeCapture: boolean | null = null;
 
   logScreenshotDebug("[screenshot] capture start");
+
+  try {
+    wasVisibleBeforeCapture = await win.isVisible();
+    logScreenshotDebug("[screenshot] visible before capture", {
+      wasVisibleBeforeCapture,
+    });
+  } catch (error) {
+    console.warn(
+      "Failed to read window visibility before screenshot capture:",
+      error
+    );
+  }
 
   try {
     const position = await win.outerPosition();
@@ -28,7 +41,7 @@ export const captureWithoutOverlay = async (): Promise<string | null> => {
 
   try {
     await win.hide();
-    shouldRestoreWindow = true;
+    shouldRestoreWindow = wasVisibleBeforeCapture ?? true;
   } catch (error) {
     console.warn("Failed to hide window before screenshot capture:", error);
   }
@@ -97,6 +110,10 @@ export const captureWithoutOverlay = async (): Promise<string | null> => {
       } catch (error) {
         console.warn("Failed to restore window focus after capture:", error);
       }
+    } else if (wasVisibleBeforeCapture === false) {
+      logScreenshotDebug(
+        "[screenshot] restore skipped because window was already hidden before capture"
+      );
     }
   }
 };
