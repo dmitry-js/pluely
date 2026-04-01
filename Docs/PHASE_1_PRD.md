@@ -86,3 +86,35 @@ If shortcut conflict occurs:
 - Shortcuts work reliably.
 - No regressions in existing functionality.
 - No changes in license/payment logic.
+
+---
+
+## Phase 2 – AI Screenshot Assistant
+
+### Objective
+
+Добавить AI-ассистент для анализа screenshots без слома существующего текстового чата.
+
+### Scope
+
+- Захват screenshots из overlay с временным скрытием окна перед capture.
+- Поддержка двух режимов:
+  - `manual`: screenshots накапливаются в attachments и отправляются одной пачкой.
+  - `auto`: screenshot сразу уходит в AI-запрос с настроенным prompt.
+- Поддержка multi-screenshot requests: несколько изображений объединяются в один контекст.
+- Stateless screenshot AI requests: для screenshot-mode не передаётся предыдущая chat history.
+- Coding-task support: short-mode получает повышенный token budget и screenshot-aware prompt override.
+- Prompt engineering: screenshot prompt задаётся в настройках и дополняется служебным hint для multi-screenshot контекста.
+
+### Non-Goals
+
+- Не смешивать screenshot history с обычной chat history.
+- Не строить сложный polling/state machine для screenshot pipeline.
+- Не реализовывать 2-stage pipeline `extract -> answer` в текущей фазе.
+
+### Definition of Done
+
+- Screenshot не содержит overlay UI в нормальном capture-path.
+- Manual и auto mode работают без регрессии обычного текстового ввода.
+- Multi-screenshot submit отправляет один coherent AI-request.
+- Screenshot-mode остаётся stateless и не повторяет старые screenshot-ответы.
