@@ -7,9 +7,6 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tokio::time::{sleep, Duration};
 
-#[cfg(target_os = "macos")]
-use tauri_nspanel::ManagerExt;
-
 use crate::window::{move_main_window_by, show_dashboard_window};
 
 // Temporary mute for shortcut-related logs.
@@ -458,14 +455,6 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                 }
             }
 
-            #[cfg(target_os = "macos")]
-            {
-                match app.get_webview_panel("main") {
-                    Ok(panel) => panel.show(),
-                    Err(_) => shortcut_log!("toggle_window: failed to get macOS panel"),
-                }
-            }
-
             if always_on_top_enabled {
                 match window.set_always_on_top(true) {
                     Ok(_) => shortcut_log!("toggle_window: re-applied always-on-top successfully"),
@@ -473,13 +462,15 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                 }
             }
 
-            if let Err(e) = window.set_focus() {
-                shortcut_log!("Failed to focus window: {}", e);
-            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                if let Err(e) = window.set_focus() {
+                    shortcut_log!("Failed to focus window: {}", e);
+                }
 
-            // Emit event to focus text input
-            if let Err(e) = window.emit("focus-text-input", json!({})) {
-                shortcut_log!("Failed to emit focus-text-input event: {}", e);
+                if let Err(e) = window.emit("focus-text-input", json!({})) {
+                    shortcut_log!("Failed to emit focus-text-input event: {}", e);
+                }
             }
         }
         Err(e) => {
@@ -491,13 +482,16 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
 /// Handle audio shortcut
 fn handle_audio_shortcut<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(not(target_os = "macos"))]
+        {
         // Ensure window is visible
-        if let Ok(false) = window.is_visible() {
-            if let Err(_e) = window.show() {
-                return;
-            }
-            if let Err(e) = window.set_focus() {
-                shortcut_log!("Failed to focus window: {}", e);
+            if let Ok(false) = window.is_visible() {
+                if let Err(_e) = window.show() {
+                    return;
+                }
+                if let Err(e) = window.set_focus() {
+                    shortcut_log!("Failed to focus window: {}", e);
+                }
             }
         }
 
@@ -521,14 +515,17 @@ fn handle_screenshot_shortcut<R: Runtime>(app: &AppHandle<R>) {
 /// Handle system audio shortcut
 fn handle_system_audio_shortcut<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(not(target_os = "macos"))]
+        {
         // Ensure window is visible
-        if let Ok(false) = window.is_visible() {
-            if let Err(e) = window.show() {
-                shortcut_log!("Failed to show window: {}", e);
-                return;
-            }
-            if let Err(e) = window.set_focus() {
-                shortcut_log!("Failed to focus window: {}", e);
+            if let Ok(false) = window.is_visible() {
+                if let Err(e) = window.show() {
+                    shortcut_log!("Failed to show window: {}", e);
+                    return;
+                }
+                if let Err(e) = window.set_focus() {
+                    shortcut_log!("Failed to focus window: {}", e);
+                }
             }
         }
 
@@ -850,12 +847,16 @@ fn handle_toggle_dashboard<R: Runtime>(app: &AppHandle<R>) {
 /// Handle focus input shortcut
 fn handle_focus_input<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(not(target_os = "macos"))]
+        {
         // Ensure window is visible
-        if let Ok(false) = window.is_visible() {
-            let _ = window.show();
+            if let Ok(false) = window.is_visible() {
+                let _ = window.show();
+            }
+
+            let _ = window.set_focus();
         }
 
-        let _ = window.set_focus();
         let _ = window.emit("focus-text-input", json!({}));
     }
 }

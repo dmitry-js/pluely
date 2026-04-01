@@ -133,7 +133,7 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
                 .minimizable(false)
                 .maximizable(false)
                 .visible(false)
-                .focused(true)
+                .focused(cfg!(not(target_os = "macos")))
                 .accept_first_mouse(true)
                 .build()
                 .map_err(|e| {
@@ -147,6 +147,7 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
         overlay.show().ok();
         overlay.set_always_on_top(true).ok();
 
+        #[cfg(not(target_os = "macos"))]
         if monitor.is_primary() {
             overlay.set_focus().ok();
             overlay
@@ -155,16 +156,19 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
 
-    // Give a moment for all windows to settle, then focus primary again
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Give a moment for all windows to settle, then focus primary again
+        std::thread::sleep(std::time::Duration::from_millis(100));
 
-    for (idx, monitor) in capture_monitors.iter().enumerate() {
-        if monitor.is_primary() {
-            let window_label = format!("capture-overlay-{}", idx);
-            if let Some(window) = app.get_webview_window(&window_label) {
-                window.set_focus().ok();
+        for (idx, monitor) in capture_monitors.iter().enumerate() {
+            if monitor.is_primary() {
+                let window_label = format!("capture-overlay-{}", idx);
+                if let Some(window) = app.get_webview_window(&window_label) {
+                    window.set_focus().ok();
+                }
+                break;
             }
-            break;
         }
     }
 

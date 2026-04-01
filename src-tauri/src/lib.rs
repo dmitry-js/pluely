@@ -6,13 +6,15 @@ mod db;
 mod shortcuts;
 mod window;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::Manager;
 use tauri_plugin_posthog::{init as posthog_init, PostHogConfig, PostHogOptions};
 use tokio::task::JoinHandle;
 mod speaker;
 use capture::CaptureState;
 use speaker::VadConfig;
 
+#[cfg(target_os = "macos")]
+use tauri::{AppHandle, WebviewWindow};
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
 use tauri_nspanel::{cocoa::appkit::NSWindowCollectionBehavior, panel_delegate, WebviewWindowExt};
@@ -83,6 +85,7 @@ pub fn run() {
             get_app_version,
             window::set_window_height,
             window::set_window_opacity,
+            window::set_main_window_passive,
             window::open_dashboard,
             window::toggle_dashboard,
             window::move_window,
@@ -267,6 +270,8 @@ fn init(app_handle: &AppHandle) {
     #[allow(non_upper_case_globals)]
     const NSWindowStyleMaskNonActivatingPanel: i32 = 1 << 7;
     panel.set_style_mask(NSWindowStyleMaskNonActivatingPanel);
+    panel.set_ignore_mouse_events(true);
+    panel.set_becomes_key_only_if_needed(true);
 
     #[allow(deprecated)]
     panel.set_collection_behaviour(

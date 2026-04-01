@@ -13,6 +13,7 @@ export const captureWithoutOverlay = async (): Promise<string | null> => {
   let shouldRestoreWindow = false;
   let savedPosition: { x: number; y: number } | null = null;
   let wasVisibleBeforeCapture: boolean | null = null;
+  const canUseVisibleFallback = () => wasVisibleBeforeCapture !== false;
 
   logScreenshotDebug("[screenshot] capture start");
 
@@ -55,18 +56,20 @@ export const captureWithoutOverlay = async (): Promise<string | null> => {
 
     let base64 = await invoke<string>("capture_to_base64");
     if (!base64 || typeof base64 !== "string" || base64.length === 0) {
-      console.warn(
-        "[screenshot] hidden capture failed, retrying without overlay hide"
-      );
+      if (canUseVisibleFallback()) {
+        console.warn(
+          "[screenshot] hidden capture failed, retrying without overlay hide"
+        );
 
-      try {
-        await win.show();
-      } catch {}
+        try {
+          await win.show();
+        } catch {}
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, SCREENSHOT_FALLBACK_CAPTURE_DELAY_MS)
-      );
-      base64 = await invoke<string>("capture_to_base64");
+        await new Promise((resolve) =>
+          setTimeout(resolve, SCREENSHOT_FALLBACK_CAPTURE_DELAY_MS)
+        );
+        base64 = await invoke<string>("capture_to_base64");
+      }
     }
 
     if (!base64 || typeof base64 !== "string" || base64.length === 0) {
@@ -103,12 +106,6 @@ export const captureWithoutOverlay = async (): Promise<string | null> => {
         } catch (error) {
           console.warn("Failed to restore window position after capture:", error);
         }
-      }
-
-      try {
-        await win.setFocus();
-      } catch (error) {
-        console.warn("Failed to restore window focus after capture:", error);
       }
     } else if (wasVisibleBeforeCapture === false) {
       logScreenshotDebug(

@@ -23,12 +23,43 @@ pub fn setup_main_window(app: &mut App) -> Result<(), Box<dyn std::error::Error>
 
     position_window_top_center(&window, TOP_OFFSET)?;
 
-    // Set window as non-focusable on Windows
-    // #[cfg(target_os = "windows")]
-    // {
-    //     let _ = window.set_focusable(false);
-    // }
+    #[cfg(target_os = "macos")]
+    {
+        apply_main_window_passive_mode(&window, true)
+            .map_err(|error| format!("Failed to apply passive mode: {}", error))?;
+    }
 
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn apply_main_window_passive_mode<R: Runtime>(
+    window: &WebviewWindow<R>,
+    passive: bool,
+) -> Result<(), String> {
+    window
+        .set_focusable(!passive)
+        .map_err(|e| format!("Failed to set window focusable state: {}", e))?;
+
+    window
+        .set_ignore_cursor_events(passive)
+        .map_err(|e| format!("Failed to set window click-through state: {}", e))?;
+
+    let panel = window
+        .to_panel()
+        .map_err(|e| format!("Failed to access macOS panel: {}", e))?;
+
+    panel.set_ignore_mouse_events(passive);
+    panel.set_becomes_key_only_if_needed(passive);
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_main_window_passive_mode<R: Runtime>(
+    _window: &WebviewWindow<R>,
+    _passive: bool,
+) -> Result<(), String> {
     Ok(())
 }
 
@@ -96,6 +127,15 @@ pub fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), Str
     let clamped = opacity.clamp(0.4, 1.0);
 
     apply_window_opacity(&window, clamped)
+}
+
+#[tauri::command]
+pub fn set_main_window_passive(app: tauri::AppHandle, passive: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    apply_main_window_passive_mode(&window, passive)
 }
 
 #[cfg(target_os = "linux")]
