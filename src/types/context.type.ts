@@ -58,4 +58,7 @@ export type IContextType = {
   setCursorType: (type: CursorType) => void;
   supportsImages: boolean;
   setSupportsImages: (value: boolean) => void;
+  isPassiveMode: boolean;
+  setPassiveMode: (enabled: boolean) => Promise<void>;
+  togglePassiveMode: () => Promise<void>;
 };

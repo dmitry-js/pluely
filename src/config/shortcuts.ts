@@ -82,4 +82,14 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
       linux: "ctrl+enter",
     },
   },
+  {
+    id: "toggle_passive_mode",
+    name: "Toggle Passive Mode",
+    description: "Toggle the overlay between passive and interactive mode",
+    defaultKey: {
+      macos: "cmd+shift+p",
+      windows: "ctrl+shift+p",
+      linux: "ctrl+shift+p",
+    },
+  },
 ];

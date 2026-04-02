@@ -55,6 +55,7 @@ pub fn run() {
         .manage(shortcuts::RegisteredShortcuts::default())
         .manage(shortcuts::LicenseState::default())
         .manage(shortcuts::AlwaysOnTopState::default())
+        .manage(window::PassiveModeState::default())
         .manage(shortcuts::WindowPositionState::default())
         .manage(shortcuts::MoveWindowState::default())
         .plugin(tauri_plugin_opener::init())
@@ -86,6 +87,7 @@ pub fn run() {
             window::set_window_height,
             window::set_window_opacity,
             window::set_main_window_passive,
+            window::get_main_window_passive,
             window::open_dashboard,
             window::toggle_dashboard,
             window::move_window,

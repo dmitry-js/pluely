@@ -2,12 +2,35 @@
 use tauri::LogicalPosition;
 #[cfg(target_os = "linux")]
 use gtk::prelude::WidgetExt;
-use tauri::{App, AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{App, AppHandle, Emitter, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
 use tauri_nspanel::WebviewWindowExt;
 
 // The offset from the top of the screen to the window
 const TOP_OFFSET: i32 = 54;
+
+pub struct PassiveModeState {
+    enabled: AtomicBool,
+}
+
+impl Default for PassiveModeState {
+    fn default() -> Self {
+        Self {
+            enabled: AtomicBool::new(cfg!(target_os = "macos")),
+        }
+    }
+}
+
+impl PassiveModeState {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+    }
+}
 
 /// Sets up the main window with custom positioning
 pub fn setup_main_window(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +45,9 @@ pub fn setup_main_window(app: &mut App) -> Result<(), Box<dyn std::error::Error>
         .ok_or("No window found")?;
 
     position_window_top_center(&window, TOP_OFFSET)?;
+
+    let passive_state = app.state::<PassiveModeState>();
+    passive_state.set(cfg!(target_os = "macos"));
 
     #[cfg(target_os = "macos")]
     {
@@ -56,6 +82,7 @@ fn apply_main_window_passive_mode<R: Runtime>(
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 fn apply_main_window_passive_mode<R: Runtime>(
     _window: &WebviewWindow<R>,
     _passive: bool,
@@ -135,7 +162,32 @@ pub fn set_main_window_passive(app: tauri::AppHandle, passive: bool) -> Result<(
         .get_webview_window("main")
         .ok_or_else(|| "Main window not found".to_string())?;
 
-    apply_main_window_passive_mode(&window, passive)
+    #[cfg(target_os = "macos")]
+    {
+        apply_main_window_passive_mode(&window, passive)?;
+
+        let state = app.state::<PassiveModeState>();
+        state.set(passive);
+        let _ = app.emit("passive-mode-changed", passive);
+
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = passive;
+        let state = app.state::<PassiveModeState>();
+        state.set(false);
+        let _ = app.emit("passive-mode-changed", false);
+        let _ = window;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn get_main_window_passive(app: tauri::AppHandle) -> Result<bool, String> {
+    let state = app.state::<PassiveModeState>();
+    Ok(state.is_enabled())
 }
 
 #[cfg(target_os = "linux")]

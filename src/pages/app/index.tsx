@@ -1,4 +1,11 @@
-import { Card, Updater, DragButton, CustomCursor, Button } from "@/components";
+import {
+  Card,
+  Updater,
+  DragButton,
+  CustomCursor,
+  Button,
+  Badge,
+} from "@/components";
 import {
   SystemAudio,
   Completion,
@@ -15,7 +22,7 @@ import { getPlatform } from "@/lib";
 
 const App = () => {
   const { isHidden, systemAudio } = useApp();
-  const { customizable } = useAppContext();
+  const { customizable, isPassiveMode } = useAppContext();
   const platform = getPlatform();
 
   const openDashboard = async () => {
@@ -68,6 +75,15 @@ const App = () => {
             }`}
           >
             <Completion isHidden={isHidden} />
+            {platform === "macos" ? (
+              <Badge
+                variant="outline"
+                className="border-border/60 bg-background/80 text-[10px] uppercase tracking-wide text-muted-foreground"
+                title={`Overlay is currently ${isPassiveMode ? "passive" : "interactive"}`}
+              >
+                {isPassiveMode ? "Passive" : "Interactive"}
+              </Badge>
+            ) : null}
             <Button
               size={"icon"}
               className="cursor-pointer"

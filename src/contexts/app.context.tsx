@@ -4,6 +4,7 @@ import {
   SPEECH_TO_TEXT_PROVIDERS,
   STORAGE_KEYS,
 } from "@/config";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { getPlatform, safeLocalStorage, trackAppStart } from "@/lib";
 import { getShortcutsConfig } from "@/lib/storage";
 import {
@@ -146,6 +147,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [pluelyApiEnabled, setPluelyApiEnabledState] = useState<boolean>(
     safeLocalStorage.getItem(STORAGE_KEYS.PLUELY_API_ENABLED) === "true"
   );
+  const [isPassiveMode, setIsPassiveMode] = useState<boolean>(false);
+  const globalShortcuts = useGlobalShortcuts();
 
   const getActiveLicenseStatus = async () => {
     const response: { is_active: boolean; is_dev_license: boolean } =
@@ -362,6 +365,33 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     // Load data
     loadData();
     initializeApp();
+  }, []);
+
+  useEffect(() => {
+    const syncPassiveMode = async () => {
+      try {
+        const passive = await invoke<boolean>("get_main_window_passive");
+        setIsPassiveMode(passive);
+      } catch (error) {
+        setIsPassiveMode(false);
+      }
+    };
+
+    syncPassiveMode();
+
+    let unlisten: (() => void) | undefined;
+
+    listen<boolean>("passive-mode-changed", (event) => {
+      setIsPassiveMode(Boolean(event.payload));
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
   }, []);
 
   // Handle customizable settings on state changes
@@ -680,6 +710,35 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     loadData();
   };
 
+  const setPassiveMode = async (enabled: boolean) => {
+    try {
+      await invoke("set_main_window_passive", { passive: enabled });
+      setIsPassiveMode(enabled);
+    } catch (error) {
+      console.error("Failed to set passive mode:", error);
+    }
+  };
+
+  const togglePassiveMode = async () => {
+    await setPassiveMode(!isPassiveMode);
+  };
+
+  useEffect(() => {
+    const shortcutActionId = "toggle_passive_mode";
+
+    globalShortcuts.registerCustomShortcutCallback(shortcutActionId, () => {
+      void togglePassiveMode();
+    });
+
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback(shortcutActionId);
+    };
+  }, [
+    globalShortcuts.registerCustomShortcutCallback,
+    globalShortcuts.unregisterCustomShortcutCallback,
+    isPassiveMode,
+  ]);
+
   // Create the context value (extend IContextType accordingly)
   const value: IContextType = {
     systemPrompt,
@@ -709,6 +768,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setCursorType,
     supportsImages,
     setSupportsImages,
+    isPassiveMode,
+    setPassiveMode,
+    togglePassiveMode,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
