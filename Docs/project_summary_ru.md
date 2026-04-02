@@ -7,6 +7,7 @@
 - Настройка `Response Length` теперь влияет не только на prompt, но и на API-параметры ответа (токены/effort).
 - Добавлен общий HTTP-клиент `reqwest` в state Tauri для переиспользования keep-alive соединений.
 - Screenshot-mode выделен в отдельный stateless AI-path: история не передаётся, изображения становятся основным контекстом, а prompt идёт отдельным `system_prompt`.
+- Для main overlay добавлен runtime-переключатель passive/interactive mode на macOS без session persistence.
 
 ## Что обновлено в текущем цикле
 - Вынесен общий screenshot-pipeline в `src/lib/screenshot/`: константы, builder запроса и shared helper захвата без overlay:
@@ -58,6 +59,19 @@
   `src-tauri/src/api.rs:113`, `src-tauri/src/lib.rs:213`.
 - Временно заглушены shortcut-логи через локальный макрос:
   `src-tauri/src/shortcuts.rs:15`, `src-tauri/src/lib.rs:169`.
+- Для main window добавлен backend state passive mode + команды `set_main_window_passive` / `get_main_window_passive`:
+  `src-tauri/src/window.rs:13`, `src-tauri/src/window.rs:159`, `src-tauri/src/window.rs:187`,
+  `src-tauri/src/lib.rs:58`, `src-tauri/src/lib.rs:89`.
+- На macOS passive mode теперь можно переключать в runtime:
+  `passive=true` делает окно non-focusable и click-through, `passive=false` возвращает обычную интерактивность:
+  `src-tauri/src/window.rs:61`.
+- В существующую shortcut-систему добавлено действие `toggle_passive_mode` с дефолтом `Cmd/Ctrl+Shift+P`:
+  `src/config/shortcuts.ts:85`.
+- Frontend синхронизирует passive mode с backend через runtime state и событие `passive-mode-changed`;
+  состояние сессионное, без `localStorage`:
+  `src/contexts/app.context.tsx:150`, `src/contexts/app.context.tsx:370`, `src/contexts/app.context.tsx:713`.
+- В overlay UI добавлен компактный индикатор текущего режима `Passive / Interactive`:
+  `src/pages/app/index.tsx:78`.
 
 ## AI Pipeline
 
@@ -94,6 +108,8 @@
 - Текущее secure storage реализовано в рамках существующего локального механизма проекта; отдельной миграции на OS keychain пока нет.
 - Для OpenAI добавлены диагностические backend-логи по длине ответа, фильтрации контекста и первому чанку.
 - Из-за временного mute shortcut-логов снижена диагностируемость проблем hotkeys.
+- Passive mode пока ориентирован на macOS; на других платформах backend оставляет поведение безопасным no-op.
+- По результатам ручного тестирования на macOS приложение падает при переключении passive/interactive mode через горячую клавишу; баг не исправлен и требует отдельного разбора.
 
 ## Ограничения
 - Качество screenshot-анализа зависит от читаемости изображения, масштаба, контраста и плотности текста.
@@ -109,3 +125,4 @@
 - Решить, нужен ли настраиваемый лимит для `auto` вместо фиксированного `800`.
 - Проверить отдельным сценарием OpenAI multi-turn с изображениями после обновлённой фильтрации истории.
 - Вернуть shortcut-логи под debug/env-флаг после стабилизации hotkeys.
+- Проверить и исправить crash на macOS при переключении passive/interactive mode через shortcut.

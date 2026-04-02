@@ -33,3 +33,14 @@
 - Следующие шаги: прогнать manual/auto screenshot smoke-test на Linux.
 - Следующие шаги: проверить сценарий «окно скрыто до capture» и «окно видно до capture».
 - Следующие шаги: протестировать 3–5 screenshot coding-задач в `short` и зафиксировать результат.
+
+## 2026-04-03
+- Ключевые пункты: для main overlay добавлен runtime passive mode state в backend Tauri с командами чтения/записи (`src-tauri/src/window.rs:13`).
+- Ключевые пункты: passive mode интегрирован в существующую shortcut-систему как `toggle_passive_mode` с дефолтом `Cmd/Ctrl+Shift+P` (`src/config/shortcuts.ts:85`).
+- Ключевые пункты: frontend синхронизирует состояние режима через `get_main_window_passive` и событие `passive-mode-changed`, без `localStorage`.
+- Ключевые пункты: в overlay добавлен компактный индикатор `Passive / Interactive` (`src/pages/app/index.tsx:78`).
+- Риски/вопросы: по ручному тестированию на macOS переключение passive/interactive через shortcut приводит к падению приложения.
+- Риски/вопросы: пока не решено, нужно ли сохранять passive mode между запусками.
+- Следующие шаги: воспроизвести и локализовать crash на macOS при toggle passive mode через hotkey.
+- Следующие шаги: проверить toggle passive mode в сценариях click-through, screenshot capture и show/hide окна.
+- Следующие шаги: убедиться, что shortcut действительно конфигурируется через существующий dashboard UI без регрессий.
