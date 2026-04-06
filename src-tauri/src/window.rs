@@ -60,6 +60,17 @@ pub fn setup_main_window(app: &mut App) -> Result<(), Box<dyn std::error::Error>
 
 #[cfg(target_os = "macos")]
 fn apply_main_window_passive_mode<R: Runtime>(
+    _window: &WebviewWindow<R>,
+    _passive: bool,
+) -> Result<(), String> {
+    // The main overlay is panelized on macOS, so runtime passive-mode toggling
+    // stays disabled here until we have a panel-safe implementation.
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+fn apply_main_window_passive_mode<R: Runtime>(
     window: &WebviewWindow<R>,
     passive: bool,
 ) -> Result<(), String> {
@@ -71,22 +82,6 @@ fn apply_main_window_passive_mode<R: Runtime>(
         .set_ignore_cursor_events(passive)
         .map_err(|e| format!("Failed to set window click-through state: {}", e))?;
 
-    let panel = window
-        .to_panel()
-        .map_err(|e| format!("Failed to access macOS panel: {}", e))?;
-
-    panel.set_ignore_mouse_events(passive);
-    panel.set_becomes_key_only_if_needed(passive);
-
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-#[allow(dead_code)]
-fn apply_main_window_passive_mode<R: Runtime>(
-    _window: &WebviewWindow<R>,
-    _passive: bool,
-) -> Result<(), String> {
     Ok(())
 }
 

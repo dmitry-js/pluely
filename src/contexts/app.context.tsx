@@ -711,6 +711,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const setPassiveMode = async (enabled: boolean) => {
+    // TODO: Restore macOS runtime passive-mode toggling once panel-safe
+    // passive behavior is implemented for the overlay window.
+    if (getPlatform() === "macos") {
+      return;
+    }
+
     try {
       await invoke("set_main_window_passive", { passive: enabled });
       setIsPassiveMode(enabled);

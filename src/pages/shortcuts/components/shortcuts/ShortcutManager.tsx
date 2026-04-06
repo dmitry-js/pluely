@@ -9,6 +9,7 @@ import {
   checkShortcutConflicts,
   formatShortcutKeyForDisplay,
   getPlatformDefaultKey,
+  getPlatform,
 } from "@/lib";
 import { ShortcutAction, ShortcutBinding } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -17,6 +18,7 @@ import { ShortcutRecorder } from "./ShortcutRecorder";
 
 export const ShortcutManager = () => {
   const { hasActiveLicense } = useApp();
+  const platform = getPlatform();
   const [actions, setActions] = useState<ShortcutAction[]>([]);
   const [bindings, setBindings] = useState<Record<string, ShortcutBinding>>({});
   const [editingAction, setEditingAction] = useState<string | null>(null);
@@ -206,6 +208,8 @@ export const ShortcutManager = () => {
             key: getPlatformDefaultKey(action),
             enabled: true,
           };
+          const isPassiveModeUnavailable =
+            platform === "macos" && action.id === "toggle_passive_mode";
           const isLocked = !hasActiveLicense;
           const isEditing = editingAction === action.id;
 
@@ -213,7 +217,7 @@ export const ShortcutManager = () => {
             <Card
               key={action.id}
               className={`shadow-none p-4 border border-border/70 rounded-xl ${
-                !binding.enabled ? "opacity-50" : ""
+                !binding.enabled || isPassiveModeUnavailable ? "opacity-50" : ""
               } ${isLocked ? "bg-muted/30" : ""}`}
             >
               {isEditing ? (
@@ -242,11 +246,13 @@ export const ShortcutManager = () => {
                 <div className="flex items-center gap-3">
                   <div className="flex items-center">
                     <Switch
-                      checked={binding.enabled}
+                      checked={
+                        isPassiveModeUnavailable ? false : binding.enabled
+                      }
                       onCheckedChange={(enabled) =>
                         handleToggleEnabled(action.id, enabled)
                       }
-                      disabled={isApplying}
+                      disabled={isApplying || isPassiveModeUnavailable}
                     />
                   </div>
 
@@ -260,7 +266,9 @@ export const ShortcutManager = () => {
                       )}
                     </div>
                     <p className="text-[10px] lg:text-xs text-muted-foreground">
-                      {action.description}
+                      {isPassiveModeUnavailable
+                        ? "Temporarily unavailable on macOS"
+                        : action.description}
                     </p>
                   </div>
 
@@ -276,14 +284,16 @@ export const ShortcutManager = () => {
                       size="sm"
                       variant={isLocked ? "outline" : "default"}
                       onClick={() => {
-                        if (isLocked) return;
+                        if (isLocked || isPassiveModeUnavailable) return;
                         setEditingAction(action.id);
                         setConflicts([]);
                       }}
-                      disabled={isLocked || isApplying}
+                      disabled={isLocked || isApplying || isPassiveModeUnavailable}
                       className="min-w-[80px]"
                       title={
-                        isLocked
+                        isPassiveModeUnavailable
+                          ? "Temporarily unavailable on macOS"
+                          : isLocked
                           ? "License required to customize"
                           : "Change this shortcut"
                       }
