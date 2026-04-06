@@ -56,3 +56,13 @@
 - Следующие шаги: стабилизировать `opacity` и сценарии show/hide/screenshot на macOS.
 - Следующие шаги: подготовить критерии приёмки для возвращения passive mode без регрессий.
 - Следующие шаги: вернуть диагностируемость hotkeys/window behavior под управляемый debug-путь.
+
+## 2026-04-06
+- Ключевые пункты: найдена причина краша opacity на macOS — повторный runtime `to_panel()` для уже panelized main window.
+- Ключевые пункты: реализован безопасный доступ к существующему panel через `get_webview_panel(...)` вместо повторной panel re-creation.
+- Ключевые пункты: runtime re-panelization убран из backend opacity path на macOS.
+- Ключевые пункты: для transparency slider на macOS добавлен commit-only update вместо live native update во время drag.
+- Риски/вопросы: поведение panel при нестандартных lifecycle состояниях всё ещё требует отдельной проверки.
+- Риски/вопросы: нужна дальнейшая стабилизация общего window lifecycle на macOS.
+- Следующие шаги: проверить stability в сценариях hide/show и screenshot flow.
+- Следующие шаги: продолжить работу над macOS window layer и panel state.

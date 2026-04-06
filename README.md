@@ -9,6 +9,7 @@ It currently focuses on screenshot-based assistance, fast streaming AI responses
 | Area | What was done / improved | Status | Next |
 |---|---|---:|---|
 | Overlay window | Global shortcuts, window movement, fixed-step movement, macOS overlay stability cleanup | ✅ | UX polish |
+| macOS opacity | Native window opacity is now stable in runtime updates | ✅ | More real-world testing |
 | macOS passive mode | Runtime toggle temporarily disabled to avoid unstable panel/window behavior | ⚠️ | Restore with a safe implementation |
 | Screenshot pipeline | Manual / Auto mode, multi-screenshot submit, stateless screenshot requests | ✅ | More real-world testing |
 | Screenshot capture | Hide → capture → restore, overlay exclusion, position restore | ✅ | Cross-platform validation |

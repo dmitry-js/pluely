@@ -70,6 +70,13 @@
   `src/contexts/app.context.tsx:713`.
 - Из overlay UI на macOS убран индикатор passive mode, чтобы не показывать нерабочий runtime-control:
   `src/pages/app/index.tsx:21`.
+- Crash native opacity на macOS устранён:
+  runtime update больше не делает повторный `to_panel()`, а переиспользует уже созданный panel через
+  `get_webview_panel(...)`; это убирает небезопасный runtime re-panelization:
+  `src-tauri/src/window.rs:209`, `src-tauri/src/lib.rs:241`.
+- Для transparency slider на macOS применён stability-first режим:
+  во время drag обновляется локальное значение UI, а native opacity коммитится только по завершению drag:
+  `src/pages/settings/components/Theme.tsx:108`.
 - Текущий фокус цикла: стабильность window lifecycle, opacity и предсказуемость overlay UX вместо расширения feature-surface.
 
 ## AI Pipeline
@@ -108,7 +115,7 @@
 - Для OpenAI добавлены диагностические backend-логи по длине ответа, фильтрации контекста и первому чанку.
 - Из-за временного mute shortcut-логов снижена диагностируемость проблем hotkeys.
 - Runtime passive mode toggle на macOS временно отключён; shortcut и overlay UI приведены к честному degraded state без ложных ожиданий.
-- Следующая зона риска на macOS: opacity и связанное поведение окна/панели при show/hide и других hotkey flow.
+- Native opacity на macOS теперь стабилен в обычном runtime path; следующая зона риска — window/panel lifecycle при show/hide и других hotkey flow.
 
 ## Ограничения
 - Качество screenshot-анализа зависит от читаемости изображения, масштаба, контраста и плотности текста.
@@ -125,4 +132,4 @@
 - Проверить отдельным сценарием OpenAI multi-turn с изображениями после обновлённой фильтрации истории.
 - Вернуть shortcut-логи под debug/env-флаг после стабилизации hotkeys.
 - Вернуть macOS passive mode только после panel-safe реализации и отдельного smoke-test набора.
-- Отдельно стабилизировать opacity/window behavior на macOS и зафиксировать критерии приёмки.
+- Дожать macOS window lifecycle после фикса opacity и зафиксировать критерии приёмки для hide/show и panel state.

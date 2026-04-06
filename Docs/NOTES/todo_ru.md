@@ -1,6 +1,10 @@
-- [ ] Исправить `opacity` на macOS.
-  - Приёмка: изменение opacity не ломает show/hide и не даёт артефактов у overlay.
-  - Приёмка: smoke-test проходит для сценариев startup, dashboard open, screenshot flow.
+- [x] Стабилизировать native `opacity` на macOS.
+  - Приёмка: изменение opacity больше не приводит к crash в settings slider.
+  - Приёмка: runtime update использует существующий panel без повторного `to_panel()`.
+
+- [ ] Harden macOS window lifecycle (`opacity` + panel state).
+  - Приёмка: проверки проходят для hide/show и быстрых изменений состояния окна.
+  - Приёмка: нет регрессий при повторных runtime update и в нестандартных panel state.
 
 - [ ] Стабилизировать window behavior на macOS в hotkey flow.
   - Приёмка: сценарии hide/show, screenshot shortcut и dashboard toggle не приводят к падению приложения.
