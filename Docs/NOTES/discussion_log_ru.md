@@ -44,3 +44,15 @@
 - Следующие шаги: воспроизвести и локализовать crash на macOS при toggle passive mode через hotkey.
 - Следующие шаги: проверить toggle passive mode в сценариях click-through, screenshot capture и show/hide окна.
 - Следующие шаги: убедиться, что shortcut действительно конфигурируется через существующий dashboard UI без регрессий.
+
+## 2026-04-06
+- Ключевые пункты: принято решение временно заморозить runtime toggle passive mode на macOS ради стабильности window lifecycle.
+- Ключевые пункты: backend passive-mode path на macOS переведён в безопасный degraded state без runtime-переключения.
+- Ключевые пункты: passive mode control убран из overlay UI на macOS, чтобы не показывать нерабочий runtime-state.
+- Ключевые пункты: shortcut `Toggle passive mode` сохранён в settings, но явно отключён/недоступен на macOS.
+- Ключевые пункты: frontend shortcut guard больше не вызывает misleading passive-mode toggle на macOS.
+- Риски/вопросы: точная panel-safe стратегия для возврата passive mode пока не выбрана.
+- Риски/вопросы: отдельной проверки требует `opacity` и общее поведение окна на macOS в hotkey flow.
+- Следующие шаги: стабилизировать `opacity` и сценарии show/hide/screenshot на macOS.
+- Следующие шаги: подготовить критерии приёмки для возвращения passive mode без регрессий.
+- Следующие шаги: вернуть диагностируемость hotkeys/window behavior под управляемый debug-путь.
