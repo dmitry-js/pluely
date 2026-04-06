@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tokio::time::{sleep, Duration};
 
-use crate::window::{move_main_window_by, show_dashboard_window};
+use crate::window::show_dashboard_window;
 
 // Temporary mute for shortcut-related logs.
 macro_rules! shortcut_log {
@@ -140,86 +140,22 @@ pub struct ShortcutsConfig {
     pub bindings: HashMap<String, ShortcutBinding>,
 }
 
-const FIXED_MOVE_STEP: i32 = 50;
-
-const FIXED_MOVE_SHORTCUTS: [(&str, &str, i32, i32); 4] = [
-    (
-        "fixed_move_window_left",
-        "CmdOrCtrl+Shift+Left",
-        -FIXED_MOVE_STEP,
-        0,
-    ),
-    (
-        "fixed_move_window_right",
-        "CmdOrCtrl+Shift+Right",
-        FIXED_MOVE_STEP,
-        0,
-    ),
-    (
-        "fixed_move_window_up",
-        "CmdOrCtrl+Shift+Up",
-        0,
-        -FIXED_MOVE_STEP,
-    ),
-    (
-        "fixed_move_window_down",
-        "CmdOrCtrl+Shift+Down",
-        0,
-        FIXED_MOVE_STEP,
-    ),
-];
-
 /// Initialize global shortcuts for the application
 pub fn setup_global_shortcuts<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Let the frontend initialize from localStorage
     let state = app.state::<RegisteredShortcuts>();
-    let mut registered = match state.shortcuts.lock() {
+    let _registered = match state.shortcuts.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             shortcut_log!("Mutex poisoned in setup, recovering...");
             poisoned.into_inner()
         }
     };
-    let fixed_registered = register_fixed_move_shortcuts(app);
-    registered.extend(fixed_registered);
     shortcut_log!("Global shortcuts state initialized, waiting for frontend config");
 
     Ok(())
-}
-
-fn register_fixed_move_shortcuts<R: Runtime>(app: &AppHandle<R>) -> HashMap<String, String> {
-    let mut successfully_registered = HashMap::new();
-
-    for (action_id, shortcut_str, _, _) in FIXED_MOVE_SHORTCUTS {
-        let parsed_shortcut = match shortcut_str.parse::<Shortcut>() {
-            Ok(shortcut) => shortcut,
-            Err(e) => {
-                shortcut_log!("Invalid fixed shortcut '{}': {}", shortcut_str, e);
-                continue;
-            }
-        };
-
-        match app.global_shortcut().register(parsed_shortcut) {
-            Ok(_) => {
-                shortcut_log!(
-                    "Registered fixed move shortcut: {} -> {}",
-                    action_id, shortcut_str
-                );
-                successfully_registered
-                    .insert(action_id.to_string(), shortcut_str.to_string());
-            }
-            Err(e) => {
-                shortcut_log!(
-                    "Failed to register fixed move shortcut {} ({}): {}",
-                    action_id, shortcut_str, e
-                );
-            }
-        }
-    }
-
-    successfully_registered
 }
 
 /// Handle shortcut action based on action_id
@@ -232,26 +168,6 @@ pub fn handle_shortcut_action<R: Runtime>(app: &AppHandle<R>, action_id: &str) {
         "move_window_down" => handle_move_window(app, "down"),
         "move_window_left" => handle_move_window(app, "left"),
         "move_window_right" => handle_move_window(app, "right"),
-        "fixed_move_window_left" => {
-            if let Err(e) = move_main_window_by(app, -FIXED_MOVE_STEP, 0) {
-                shortcut_log!("Failed to move window left: {}", e);
-            }
-        }
-        "fixed_move_window_right" => {
-            if let Err(e) = move_main_window_by(app, FIXED_MOVE_STEP, 0) {
-                shortcut_log!("Failed to move window right: {}", e);
-            }
-        }
-        "fixed_move_window_up" => {
-            if let Err(e) = move_main_window_by(app, 0, -FIXED_MOVE_STEP) {
-                shortcut_log!("Failed to move window up: {}", e);
-            }
-        }
-        "fixed_move_window_down" => {
-            if let Err(e) = move_main_window_by(app, 0, FIXED_MOVE_STEP) {
-                shortcut_log!("Failed to move window down: {}", e);
-            }
-        }
         "audio_recording" => handle_audio_shortcut(app),
         "screenshot" => handle_screenshot_shortcut(app),
         "system_audio" => handle_system_audio_shortcut(app),
@@ -643,9 +559,6 @@ pub fn update_shortcuts<R: Runtime>(
         }
     }
 
-    // Update state with successfully registered shortcuts
-    let fixed_registered = register_fixed_move_shortcuts(&app);
-
     {
         let state = app.state::<RegisteredShortcuts>();
         let mut registered = match state.shortcuts.lock() {
@@ -658,7 +571,6 @@ pub fn update_shortcuts<R: Runtime>(
 
         registered.clear();
         registered.extend(successfully_registered);
-        registered.extend(fixed_registered);
     }
 
     if !registration_failures.is_empty() {

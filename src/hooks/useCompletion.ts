@@ -931,6 +931,29 @@ export const useCompletion = () => {
     state.error !== null ||
     keepEngaged;
 
+  const scrollResponseViewport = useCallback(
+    (direction: "up" | "down") => {
+      if (!isPopoverOpen) {
+        return;
+      }
+
+      const scrollElement = scrollAreaRef.current?.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      ) as HTMLElement | null;
+
+      if (!scrollElement) {
+        return;
+      }
+
+      const scrollAmount = 160;
+      scrollElement.scrollBy({
+        top: direction === "down" ? scrollAmount : -scrollAmount,
+        behavior: "smooth",
+      });
+    },
+    [isPopoverOpen]
+  );
+
   useEffect(() => {
     resizeWindow(
       isPopoverOpen || micOpen || messageHistoryOpen || isFilesPopoverOpen
@@ -1219,6 +1242,27 @@ export const useCompletion = () => {
     screenshotConfiguration.mode,
     state.attachedFiles,
     submitScreenshots,
+  ]);
+
+  useEffect(() => {
+    globalShortcuts.registerCustomShortcutCallback("scroll_response_up", () => {
+      scrollResponseViewport("up");
+    });
+    globalShortcuts.registerCustomShortcutCallback(
+      "scroll_response_down",
+      () => {
+        scrollResponseViewport("down");
+      }
+    );
+
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback("scroll_response_up");
+      globalShortcuts.unregisterCustomShortcutCallback("scroll_response_down");
+    };
+  }, [
+    globalShortcuts.registerCustomShortcutCallback,
+    globalShortcuts.unregisterCustomShortcutCallback,
+    scrollResponseViewport,
   ]);
 
   return {

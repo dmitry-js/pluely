@@ -42,6 +42,26 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
     },
   },
   {
+    id: "scroll_response_up",
+    name: "Scroll Response Up",
+    description: "Scroll the overlay response viewport up",
+    defaultKey: {
+      macos: "cmd+shift+up",
+      windows: "ctrl+shift+up",
+      linux: "ctrl+shift+up",
+    },
+  },
+  {
+    id: "scroll_response_down",
+    name: "Scroll Response Down",
+    description: "Scroll the overlay response viewport down",
+    defaultKey: {
+      macos: "cmd+shift+down",
+      windows: "ctrl+shift+down",
+      linux: "ctrl+shift+down",
+    },
+  },
+  {
     id: "system_audio",
     name: "System Audio",
     description: "Toggle system audio capture",
