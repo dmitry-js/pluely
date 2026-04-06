@@ -1,16 +1,25 @@
 import { useApp, useTheme } from "@/contexts";
 import { Header, Label, Slider, Button } from "@/components";
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
+import { getPlatform } from "@/lib";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components";
+import { useEffect, useState } from "react";
 
 export const Theme = () => {
   const { theme, transparency, setTheme, onSetTransparency } = useTheme();
   const { hasActiveLicense } = useApp();
+  const platform = getPlatform();
+  const isMacOS = platform === "macos";
+  const [sliderTransparency, setSliderTransparency] = useState(transparency);
+
+  useEffect(() => {
+    setSliderTransparency(transparency);
+  }, [transparency]);
 
   return (
     <div id="theme" className="relative space-y-3">
@@ -99,8 +108,20 @@ export const Theme = () => {
         <div className="space-y-3">
           <div className="flex items-center gap-4 mt-4">
             <Slider
-              value={[transparency]}
-              onValueChange={(value: number[]) => onSetTransparency(value[0])}
+              value={[sliderTransparency]}
+              onValueChange={(value: number[]) => {
+                const nextValue = value[0];
+                setSliderTransparency(nextValue);
+
+                if (!isMacOS) {
+                  onSetTransparency(nextValue);
+                }
+              }}
+              onValueCommit={(value: number[]) => {
+                if (isMacOS) {
+                  onSetTransparency(value[0]);
+                }
+              }}
               min={0}
               max={100}
               step={1}

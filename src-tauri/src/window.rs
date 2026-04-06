@@ -5,7 +5,7 @@ use gtk::prelude::WidgetExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{App, AppHandle, Emitter, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
-use tauri_nspanel::WebviewWindowExt;
+use tauri_nspanel::ManagerExt;
 
 // The offset from the top of the screen to the window
 const TOP_OFFSET: i32 = 54;
@@ -209,12 +209,13 @@ fn apply_window_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> 
 fn apply_window_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let window_for_main_thread = window.clone();
+    let window_label = window.label().to_string();
 
     window
         .run_on_main_thread(move || {
             let result = window_for_main_thread
-                .to_panel()
-                .map_err(|e| format!("Failed to access main panel: {}", e))
+                .get_webview_panel(&window_label)
+                .map_err(|e| format!("Failed to access main panel: {:?}", e))
                 .map(|panel| panel.set_alpha_value(opacity));
 
             let _ = tx.send(result);
