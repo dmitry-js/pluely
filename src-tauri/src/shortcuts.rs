@@ -383,10 +383,10 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                 if let Err(e) = window.set_focus() {
                     shortcut_log!("Failed to focus window: {}", e);
                 }
+            }
 
-                if let Err(e) = window.emit("focus-text-input", json!({})) {
-                    shortcut_log!("Failed to emit focus-text-input event: {}", e);
-                }
+            if let Err(e) = window.emit("focus-text-input", json!({})) {
+                shortcut_log!("Failed to emit focus-text-input event: {}", e);
             }
         }
         Err(e) => {

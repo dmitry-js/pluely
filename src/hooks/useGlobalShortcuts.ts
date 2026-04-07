@@ -23,6 +23,15 @@ let globalScreenshotCallback: (() => void | Promise<void>) | null = null;
 let globalSystemAudioCallback: (() => void) | null = null;
 let globalCustomShortcutCallbacks: Map<string, () => void> = new Map();
 
+const focusRegisteredInput = () => {
+  if (!globalInputRef) {
+    return;
+  }
+
+  globalInputRef.focus();
+  globalInputRef.select?.();
+};
+
 export const useGlobalShortcuts = () => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const audioCallbackRef = useRef<(() => void) | null>(null);
@@ -162,10 +171,11 @@ export const useGlobalShortcuts = () => {
         // Listen for focus text input event
         const unlistenFocus = await listen("focus-text-input", () => {
           setTimeout(() => {
-            if (globalInputRef) {
-              globalInputRef.focus();
-            }
+            focusRegisteredInput();
           }, 100);
+          requestAnimationFrame(() => {
+            focusRegisteredInput();
+          });
         });
         globalEventListeners.focus = unlistenFocus;
 

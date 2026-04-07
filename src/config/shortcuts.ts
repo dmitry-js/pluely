@@ -32,6 +32,16 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
     },
   },
   {
+    id: "toggle_response_panel",
+    name: "Toggle Response Panel",
+    description: "Show or hide the overlay response area",
+    defaultKey: {
+      macos: "cmd+shift+r",
+      windows: "ctrl+shift+r",
+      linux: "ctrl+shift+r",
+    },
+  },
+  {
     id: "move_window",
     name: "Move Window",
     description: "Move overlay with arrow keys (hold to move continuously)",

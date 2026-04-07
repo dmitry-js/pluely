@@ -39,11 +39,6 @@ export const Input = ({
     <div className="relative flex-1">
       <Popover
         open={isPopoverOpen}
-        onOpenChange={(open) => {
-          if (!open && !isLoading && !keepEngaged) {
-            reset();
-          }
-        }}
       >
         <PopoverTrigger asChild className="!border-none !bg-transparent">
           <div className="relative select-none">
@@ -92,6 +87,9 @@ export const Input = ({
           side="bottom"
           className="w-screen p-0 border shadow-lg overflow-hidden"
           sideOffset={8}
+          onEscapeKeyDown={(event) => {
+            event.preventDefault();
+          }}
         >
           <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30">
             <div className="flex flex-row gap-1 items-center">

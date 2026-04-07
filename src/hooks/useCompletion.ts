@@ -82,6 +82,7 @@ export const useCompletion = () => {
   const [isFilesPopoverOpen, setIsFilesPopoverOpen] = useState(false);
   const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
   const [keepEngaged, setKeepEngaged] = useState(false);
+  const [isResponsePanelVisible, setIsResponsePanelVisible] = useState(true);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isProcessingScreenshotRef = useRef(false);
   const isCaptureInProgressRef = useRef(false);
@@ -925,11 +926,31 @@ export const useCompletion = () => {
     [state.attachedFiles.length, addFile]
   );
 
-  const isPopoverOpen =
+  const hasResponsePanelContent =
     state.isLoading ||
     state.response !== "" ||
     state.error !== null ||
     keepEngaged;
+
+  const isPopoverOpen = hasResponsePanelContent && isResponsePanelVisible;
+
+  const focusInput = useCallback(() => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    input.select();
+  }, []);
+
+  const toggleResponsePanel = useCallback(() => {
+    if (!hasResponsePanelContent) {
+      return;
+    }
+
+    setIsResponsePanelVisible((prev) => !prev);
+  }, [hasResponsePanelContent]);
 
   const scrollResponseViewport = useCallback(
     (direction: "up" | "down") => {
@@ -953,6 +974,12 @@ export const useCompletion = () => {
     },
     [isPopoverOpen]
   );
+
+  useEffect(() => {
+    if (hasResponsePanelContent) {
+      setIsResponsePanelVisible(true);
+    }
+  }, [hasResponsePanelContent]);
 
   useEffect(() => {
     resizeWindow(
@@ -1014,6 +1041,39 @@ export const useCompletion = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPopoverOpen, scrollAreaRef]);
 
+  useEffect(() => {
+    const handleEscapeKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") {
+        return;
+      }
+
+      if (document.activeElement === inputRef.current) {
+        e.preventDefault();
+        inputRef.current?.blur();
+        return;
+      }
+
+      let closedTransientUi = false;
+
+      if (messageHistoryOpen) {
+        setMessageHistoryOpen(false);
+        closedTransientUi = true;
+      }
+
+      if (isFilesPopoverOpen) {
+        setIsFilesPopoverOpen(false);
+        closedTransientUi = true;
+      }
+
+      if (closedTransientUi) {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleEscapeKey, true);
+    return () => window.removeEventListener("keydown", handleEscapeKey, true);
+  }, [isFilesPopoverOpen, messageHistoryOpen]);
+
   // Keyboard shortcut for toggling keep engaged mode (Cmd+K / Ctrl+K)
   useEffect(() => {
     const handleToggleShortcut = (e: KeyboardEvent) => {
@@ -1026,14 +1086,14 @@ export const useCompletion = () => {
         setKeepEngaged((prev) => !prev);
         // Focus the input after toggle (with delay to ensure DOM is ready)
         setTimeout(() => {
-          inputRef.current?.focus();
+          focusInput();
         }, 100);
       }
     };
 
     window.addEventListener("keydown", handleToggleShortcut);
     return () => window.removeEventListener("keydown", handleToggleShortcut);
-  }, [isPopoverOpen]);
+  }, [focusInput, isPopoverOpen]);
 
   const captureScreenshot = useCallback(async () => {
     // DEBUG: screenshot tracing
@@ -1211,16 +1271,17 @@ export const useCompletion = () => {
   // register callbacks for global shortcuts
   useEffect(() => {
     globalShortcuts.registerAudioCallback(toggleRecording);
-    globalShortcuts.registerInputRef(inputRef.current);
     globalShortcuts.registerScreenshotCallback(captureScreenshot);
   }, [
     globalShortcuts.registerAudioCallback,
-    globalShortcuts.registerInputRef,
     globalShortcuts.registerScreenshotCallback,
     toggleRecording,
     captureScreenshot,
-    inputRef,
   ]);
+
+  useEffect(() => {
+    globalShortcuts.registerInputRef(inputRef.current);
+  });
 
   useEffect(() => {
     const shortcutActionId = "submit_screenshots";
@@ -1263,6 +1324,25 @@ export const useCompletion = () => {
     globalShortcuts.registerCustomShortcutCallback,
     globalShortcuts.unregisterCustomShortcutCallback,
     scrollResponseViewport,
+  ]);
+
+  useEffect(() => {
+    globalShortcuts.registerCustomShortcutCallback(
+      "toggle_response_panel",
+      () => {
+        toggleResponsePanel();
+      }
+    );
+
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback(
+        "toggle_response_panel"
+      );
+    };
+  }, [
+    globalShortcuts.registerCustomShortcutCallback,
+    globalShortcuts.unregisterCustomShortcutCallback,
+    toggleResponsePanel,
   ]);
 
   return {
