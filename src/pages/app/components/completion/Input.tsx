@@ -35,6 +35,9 @@ export const Input = ({
   keepEngaged,
   setKeepEngaged,
 }: UseCompletionReturn & { isHidden: boolean }) => {
+  const shouldShowConversationHistory =
+    conversationHistory.length > 0 && (keepEngaged || (!response && !isLoading));
+
   return (
     <div className="relative flex-1">
       <Popover
@@ -175,13 +178,13 @@ export const Input = ({
                   <Markdown>{response}</Markdown>
                 ))}
 
-              {/* Conversation History - Separate scroll, no auto-scroll */}
-              {keepEngaged && conversationHistory.length > 1 && (
+              {/* Conversation History - Render full loaded chats even outside keep-engaged mode */}
+              {shouldShowConversationHistory && (
                 <div className="space-y-3 pt-3">
                   {conversationHistory
                     .sort((a, b) => b?.timestamp - a?.timestamp)
                     .map((message, index) => {
-                      if (!isLoading && index === 0) {
+                      if (keepEngaged && response && !isLoading && index === 0) {
                         return null;
                       }
                       return (
