@@ -6,9 +6,9 @@
   - Приёмка: проверки проходят для hide/show и быстрых изменений состояния окна.
   - Приёмка: нет регрессий при повторных runtime update и в нестандартных panel state.
 
-- [ ] Стабилизировать window behavior на macOS в hotkey flow.
-  - Приёмка: сценарии hide/show, screenshot shortcut и dashboard toggle не приводят к падению приложения.
-  - Приёмка: зафиксирован короткий список воспроизводимых и невоспроизводимых кейсов.
+- [ ] Отполировать keyboard-first window behavior на macOS.
+  - Приёмка: `refocus input box` возвращает ввод без ощущения жёсткого app switch / лишнего stealing focus.
+  - Приёмка: keyboard-only сценарии overlay (`Esc`, `toggle_response_panel`, scroll response, refocus input) проходят без заметных UX-регрессий.
 
 - [ ] Подготовить panel-safe стратегию возврата passive mode на macOS.
   - Приёмка: есть краткая заметка с выбранным подходом и списком API/ограничений.

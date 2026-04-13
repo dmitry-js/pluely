@@ -66,3 +66,15 @@
 - Риски/вопросы: нужна дальнейшая стабилизация общего window lifecycle на macOS.
 - Следующие шаги: проверить stability в сценариях hide/show и screenshot flow.
 - Следующие шаги: продолжить работу над macOS window layer и panel state.
+
+## 2026-04-13
+- Ключевые пункты: keyboard-first UX overlay улучшен без расширения архитектуры shortcut-системы.
+- Ключевые пункты: `Esc` больше не прячет response panel и теперь работает как soft-cancel/blur для completion UI.
+- Ключевые пункты: response panel теперь можно надёжно вернуть shortcut’ом `toggle_response_panel`.
+- Ключевые пункты: для длинных ответов добавлены shortcuts на scroll response viewport вверх/вниз.
+- Ключевые пункты: `refocus input box` снова работает, включая сценарий после переключения в другое приложение.
+- Риски/вопросы: на macOS refocus ощущается более жёстким app-switch, чем обычный reopen overlay; это backlog на polish.
+- Риски/вопросы: keyboard-only overlay UX ещё нужно прогнать в нескольких реальных сценариях hide/show и длинных ответов.
+- Следующие шаги: отдельно отполировать более мягкий macOS refocus без лишнего ощущения stealing focus.
+- Следующие шаги: прогнать keyboard-only smoke-test для `Esc`, `toggle_response_panel`, scroll shortcuts и `refocus input`.
+- Следующие шаги: продолжить стабилизацию общего window lifecycle на macOS без возврата к unsafe panel/window path.

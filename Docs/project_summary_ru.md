@@ -77,6 +77,13 @@
 - Для transparency slider на macOS применён stability-first режим:
   во время drag обновляется локальное значение UI, а native opacity коммитится только по завершению drag:
   `src/pages/settings/components/Theme.tsx:108`.
+- Keyboard-only UX для overlay улучшен:
+  `Esc` больше не скрывает response panel и ведёт себя как soft-cancel/blur, добавлен shortcut `toggle_response_panel`,
+  а для длинных ответов появились keyboard shortcuts на scroll response viewport:
+  `src/hooks/useCompletion.ts:1041`, `src/config/shortcuts.ts:31`, `src/config/shortcuts.ts:51`.
+- Shortcut `Refocus Input Box` снова работает, включая возврат фокуса после потери активного приложения:
+  backend сначала фокусирует окно, затем frontend фокусирует input:
+  `src-tauri/src/shortcuts.rs:768`, `src/hooks/useGlobalShortcuts.ts:23`.
 - Текущий фокус цикла: стабильность window lifecycle, opacity и предсказуемость overlay UX вместо расширения feature-surface.
 
 ## AI Pipeline
@@ -116,6 +123,7 @@
 - Из-за временного mute shortcut-логов снижена диагностируемость проблем hotkeys.
 - Runtime passive mode toggle на macOS временно отключён; shortcut и overlay UI приведены к честному degraded state без ложных ожиданий.
 - Native opacity на macOS теперь стабилен в обычном runtime path; следующая зона риска — window/panel lifecycle при show/hide и других hotkey flow.
+- На macOS остаётся follow-up на более мягкий `refocus input` behavior без ощущения жёсткого app-switch; это polish-задача, не текущий блокер.
 
 ## Ограничения
 - Качество screenshot-анализа зависит от читаемости изображения, масштаба, контраста и плотности текста.
@@ -133,3 +141,4 @@
 - Вернуть shortcut-логи под debug/env-флаг после стабилизации hotkeys.
 - Вернуть macOS passive mode только после panel-safe реализации и отдельного smoke-test набора.
 - Дожать macOS window lifecycle после фикса opacity и зафиксировать критерии приёмки для hide/show и panel state.
+- Отдельно отполировать macOS refocus/input UX, чтобы возврат фокуса ощущался мягче при keyboard-first overlay.

@@ -1327,23 +1327,20 @@ export const useCompletion = () => {
   ]);
 
   useEffect(() => {
-    globalShortcuts.registerCustomShortcutCallback(
-      "toggle_response_panel",
-      () => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      unlisten = await listen("toggle-response-panel", () => {
         toggleResponsePanel();
-      }
-    );
+      });
+    };
+
+    void setupListener();
 
     return () => {
-      globalShortcuts.unregisterCustomShortcutCallback(
-        "toggle_response_panel"
-      );
+      unlisten?.();
     };
-  }, [
-    globalShortcuts.registerCustomShortcutCallback,
-    globalShortcuts.unregisterCustomShortcutCallback,
-    toggleResponsePanel,
-  ]);
+  }, [toggleResponsePanel]);
 
   return {
     input: state.input,
