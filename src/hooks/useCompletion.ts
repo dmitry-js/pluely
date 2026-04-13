@@ -353,6 +353,9 @@ export const useCompletion = () => {
   // are now imported from lib/database/chat-history.action.ts
 
   const loadConversation = useCallback((conversation: ChatConversation) => {
+    setIsResponsePanelVisible(true);
+    setMessageHistoryOpen(false);
+    setIsFilesPopoverOpen(false);
     setState((prev) => ({
       ...prev,
       currentConversationId: conversation.id,
@@ -968,7 +971,8 @@ export const useCompletion = () => {
     state.isLoading ||
     state.response !== "" ||
     state.error !== null ||
-    keepEngaged;
+    keepEngaged ||
+    state.conversationHistory.length > 0;
 
   const isPopoverOpen = hasResponsePanelContent && isResponsePanelVisible;
 
