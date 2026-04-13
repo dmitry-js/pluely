@@ -169,6 +169,7 @@ pub fn handle_shortcut_action<R: Runtime>(app: &AppHandle<R>, action_id: &str) {
         "move_window_left" => handle_move_window(app, "left"),
         "move_window_right" => handle_move_window(app, "right"),
         "toggle_response_panel" => handle_toggle_response_panel(app),
+        "new_chat" => handle_new_chat(app),
         "audio_recording" => handle_audio_shortcut(app),
         "screenshot" => handle_screenshot_shortcut(app),
         "system_audio" => handle_system_audio_shortcut(app),
@@ -423,6 +424,14 @@ fn handle_toggle_response_panel<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         if let Err(e) = window.emit("toggle-response-panel", json!({})) {
             shortcut_log!("Failed to emit toggle-response-panel event: {}", e);
+        }
+    }
+}
+
+fn handle_new_chat<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(e) = window.emit("new-chat", json!({})) {
+            shortcut_log!("Failed to emit new-chat event: {}", e);
         }
     }
 }

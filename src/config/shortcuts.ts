@@ -42,6 +42,16 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
     },
   },
   {
+    id: "new_chat",
+    name: "New Chat",
+    description: "Start a new chat and clear current context",
+    defaultKey: {
+      macos: "cmd+shift+enter",
+      windows: "ctrl+shift+enter",
+      linux: "ctrl+shift+enter",
+    },
+  },
+  {
     id: "move_window",
     name: "Move Window",
     description: "Move overlay with arrow keys (hold to move continuously)",

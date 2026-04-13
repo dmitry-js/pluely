@@ -109,6 +109,16 @@ export const useCompletion = () => {
     setState((prev) => ({ ...prev, response: value }));
   }, []);
 
+  const focusInput = useCallback(() => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    input.select();
+  }, []);
+
   const addFile = useCallback(async (file: File) => {
     try {
       const base64 = await fileToBase64(file);
@@ -355,6 +365,11 @@ export const useCompletion = () => {
   }, []);
 
   const startNewConversation = useCallback(() => {
+    cancel();
+    setKeepEngaged(false);
+    setMessageHistoryOpen(false);
+    setIsFilesPopoverOpen(false);
+    setIsResponsePanelVisible(true);
     setState((prev) => ({
       ...prev,
       currentConversationId: null,
@@ -365,7 +380,7 @@ export const useCompletion = () => {
       isLoading: false,
       attachedFiles: [],
     }));
-  }, []);
+  }, [cancel]);
 
   const saveCurrentConversation = useCallback(
     async (
@@ -447,6 +462,8 @@ export const useCompletion = () => {
 
   // Listen for conversation events from the main ChatHistory component
   useEffect(() => {
+    let unlistenNewChat: (() => void) | undefined;
+
     const handleConversationSelected = async (event: any) => {
       console.log(event, "event");
       // Only the conversation ID is passed through the event
@@ -487,6 +504,13 @@ export const useCompletion = () => {
       startNewConversation();
     };
 
+    const handleShortcutNewChat = () => {
+      startNewConversation();
+      if (document.hasFocus()) {
+        focusInput();
+      }
+    };
+
     const handleConversationDeleted = (event: any) => {
       const deletedId = event.detail;
       // If the currently active conversation was deleted, start a new one
@@ -512,6 +536,14 @@ export const useCompletion = () => {
       }
     };
 
+    const setupNewChatListener = async () => {
+      unlistenNewChat = await listen("new-chat", () => {
+        handleShortcutNewChat();
+      });
+    };
+
+    void setupNewChatListener();
+
     window.addEventListener("conversationSelected", handleConversationSelected);
     window.addEventListener("newConversation", handleNewConversation);
     window.addEventListener("conversationDeleted", handleConversationDeleted);
@@ -528,8 +560,14 @@ export const useCompletion = () => {
         handleConversationDeleted
       );
       window.removeEventListener("storage", handleStorageChange);
+      unlistenNewChat?.();
     };
-  }, [loadConversation, startNewConversation, state.currentConversationId]);
+  }, [
+    focusInput,
+    loadConversation,
+    startNewConversation,
+    state.currentConversationId,
+  ]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -933,16 +971,6 @@ export const useCompletion = () => {
     keepEngaged;
 
   const isPopoverOpen = hasResponsePanelContent && isResponsePanelVisible;
-
-  const focusInput = useCallback(() => {
-    const input = inputRef.current;
-    if (!input) {
-      return;
-    }
-
-    input.focus();
-    input.select();
-  }, []);
 
   const toggleResponsePanel = useCallback(() => {
     if (!hasResponsePanelContent) {
