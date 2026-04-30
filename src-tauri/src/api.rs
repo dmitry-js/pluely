@@ -1109,8 +1109,13 @@ pub async fn chat_stream_response(
                 short_mode_max_tokens = OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS;
             }
         }
+        let short_mode_reasoning_effort = if api_config.model.contains("gpt-5.4") {
+            "low"
+        } else {
+            "minimal"
+        };
         let (max_output_tokens, reasoning_effort): (Option<i64>, &str) = match selected_length {
-            "short" => (Some(short_mode_max_tokens), "minimal"),
+            "short" => (Some(short_mode_max_tokens), short_mode_reasoning_effort),
             "medium" => (Some(OPENAI_MEDIUM_MAX_OUTPUT_TOKENS), "medium"),
             "auto" => (Some(OPENAI_AUTO_MAX_OUTPUT_TOKENS), "medium"),
             _ => (Some(OPENAI_SHORT_MAX_OUTPUT_TOKENS), "minimal"),
