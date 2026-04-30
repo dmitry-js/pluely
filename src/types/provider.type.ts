@@ -3,5 +3,6 @@ export interface TYPE_PROVIDER {
   streaming?: boolean;
   responseContentPath?: string;
   isCustom?: boolean;
+  defaultVariables?: Record<string, string>;
   curl: string;
 }

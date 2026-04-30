@@ -11,7 +11,10 @@ import curl2Json from "@bany/curl-to-json";
 import { shouldUsePluelyAPI } from "./pluely.api";
 
 // Pluely STT function
-async function fetchPluelySTT(audio: File | Blob): Promise<string> {
+async function fetchPluelySTT(
+  audio: File | Blob,
+  transcriptionPrompt?: string
+): Promise<string> {
   try {
     // Convert audio to base64
     const audioBase64 = await blobToBase64(audio);
@@ -23,6 +26,7 @@ async function fetchPluelySTT(audio: File | Blob): Promise<string> {
       error?: string;
     }>("transcribe_audio", {
       audioBase64,
+      transcriptionPrompt,
     });
 
     if (response.success && response.transcription) {
@@ -45,6 +49,21 @@ export interface STTParams {
   audio: File | Blob;
 }
 
+function buildSttVariables(
+  provider: TYPE_PROVIDER | undefined,
+  selectedProvider: STTParams["selectedProvider"]
+): Record<string, string> {
+  return {
+    ...provider?.defaultVariables,
+    ...Object.fromEntries(
+      Object.entries(selectedProvider.variables).map(([key, value]) => [
+        key.toUpperCase(),
+        value,
+      ])
+    ),
+  };
+}
+
 /**
  * Transcribes audio and returns either the transcription or an error/warning message as a single string.
  */
@@ -53,11 +72,23 @@ export async function fetchSTT(params: STTParams): Promise<string> {
 
   try {
     const { provider, selectedProvider, audio } = params;
+    const allVariables = buildSttVariables(provider, selectedProvider);
+    if (
+      provider?.id === "openai-whisper" &&
+      !Object.prototype.hasOwnProperty.call(
+        allVariables,
+        "TRANSCRIPTION_PROMPT"
+      )
+    ) {
+      allVariables.TRANSCRIPTION_PROMPT = "";
+    }
+    const transcriptionPrompt =
+      allVariables.TRANSCRIPTION_PROMPT?.trim() || undefined;
 
     // Check if we should use Pluely API instead
     const usePluelyAPI = await shouldUsePluelyAPI();
     if (usePluelyAPI) {
-      return await fetchPluelySTT(audio);
+      return await fetchPluelySTT(audio, transcriptionPrompt);
     }
 
     if (!provider) throw new Error("Provider not provided");
@@ -83,16 +114,6 @@ export async function fetchSTT(params: STTParams): Promise<string> {
     // if (file.size > maxSize) {
     //   warnings.push("Audio exceeds 10MB limit");
     // }
-
-    // Build variable map
-    const allVariables = {
-      ...Object.fromEntries(
-        Object.entries(selectedProvider.variables).map(([key, value]) => [
-          key.toUpperCase(),
-          value,
-        ])
-      ),
-    };
 
     // Prepare request
     let url = deepVariableReplacer(curlJson.url || "", allVariables);

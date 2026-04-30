@@ -29,6 +29,18 @@ export const Providers = ({
     return sttVariables?.find((v) => v?.key === key);
   };
 
+  const selectedProviderConfig = allSttProviders?.find(
+    (p) => p?.id === selectedSttProvider?.provider
+  );
+
+  const getDefaultVariableValue = (key: string, value: string) => {
+    return (
+      selectedProviderConfig?.defaultVariables?.[key.toUpperCase()] ||
+      selectedProviderConfig?.defaultVariables?.[value] ||
+      ""
+    );
+  };
+
   const getApiKeyValue = () => {
     const apiKeyVar = findKeyAndValue("api_key");
     if (!apiKeyVar || !selectedSttProvider?.variables) return "";
@@ -80,9 +92,7 @@ export const Providers = ({
           <Header
             title="API Key"
             description={`Enter your ${
-              allSttProviders?.find(
-                (p) => p?.id === selectedSttProvider?.provider
-              )?.isCustom
+              selectedProviderConfig?.isCustom
                 ? "Custom Provider"
                 : selectedSttProvider?.provider
             } API key to authenticate and access STT models. Your key is stored locally and never shared.`}
@@ -179,32 +189,50 @@ export const Providers = ({
           .map((variable) => {
             const getVariableValue = () => {
               if (!variable?.key || !selectedSttProvider?.variables) return "";
-              return selectedSttProvider.variables[variable.key] || "";
+              if (
+                Object.prototype.hasOwnProperty.call(
+                  selectedSttProvider.variables,
+                  variable.key
+                )
+              ) {
+                return selectedSttProvider.variables[variable.key] || "";
+              }
+              return getDefaultVariableValue(variable.key, variable.value);
             };
+            const isTranscriptionPrompt =
+              variable?.key === "transcription_prompt";
 
             return (
               <div className="space-y-1" key={variable?.key}>
                 <Header
-                  title={variable?.value || ""}
-                  description={`add your preferred ${variable?.key?.replace(
-                    /_/g,
-                    " "
-                  )} for ${
-                    allSttProviders?.find(
-                      (p) => p?.id === selectedSttProvider?.provider
-                    )?.isCustom
-                      ? "Custom Provider"
-                      : selectedSttProvider?.provider
-                  }`}
+                  title={
+                    isTranscriptionPrompt
+                      ? "Transcription prompt"
+                      : variable?.value || ""
+                  }
+                  description={
+                    isTranscriptionPrompt
+                      ? "Optional speech-to-text hint sent to OpenAI Whisper. Leave empty to disable it."
+                      : `add your preferred ${variable?.key?.replace(
+                          /_/g,
+                          " "
+                        )} for ${
+                          selectedProviderConfig?.isCustom
+                            ? "Custom Provider"
+                            : selectedSttProvider?.provider
+                        }`
+                  }
                 />
                 <TextInput
-                  placeholder={`Enter ${
-                    allSttProviders?.find(
-                      (p) => p?.id === selectedSttProvider?.provider
-                    )?.isCustom
-                      ? "Custom Provider"
-                      : selectedSttProvider?.provider
-                  } ${variable?.key?.replace(/_/g, " ") || "value"}`}
+                  placeholder={
+                    isTranscriptionPrompt
+                      ? "Optional Whisper prompt/glossary"
+                      : `Enter ${
+                          selectedProviderConfig?.isCustom
+                            ? "Custom Provider"
+                            : selectedSttProvider?.provider
+                        } ${variable?.key?.replace(/_/g, " ") || "value"}`
+                  }
                   value={getVariableValue()}
                   onChange={(value) => {
                     if (!variable?.key || !selectedSttProvider) return;
