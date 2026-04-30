@@ -272,7 +272,8 @@ fn init(app_handle: &AppHandle) {
     #[allow(non_upper_case_globals)]
     const NSWindowStyleMaskNonActivatingPanel: i32 = 1 << 7;
     panel.set_style_mask(NSWindowStyleMaskNonActivatingPanel);
-    panel.set_ignore_mouse_events(true);
+    let passive = app_handle.state::<window::PassiveModeState>().is_enabled();
+    panel.set_ignore_mouse_events(passive);
     panel.set_becomes_key_only_if_needed(true);
 
     #[allow(deprecated)]

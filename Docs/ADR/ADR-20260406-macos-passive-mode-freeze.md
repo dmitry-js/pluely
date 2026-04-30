@@ -8,6 +8,7 @@
 2. Сохранить shortcut `toggle_passive_mode` в настройках, но показывать его как временно недоступный на macOS.
 3. Убрать passive mode control/indicator из overlay UI на macOS, чтобы не демонстрировать нерабочее состояние.
 4. Вернуться к реализации только после появления panel-safe подхода для passive mode и отдельной проверки opacity/window behavior.
+5. Для разработки разрешить override стартового значения через `PLUELY_PASSIVE_DEFAULT=false`, не включая обратно переключение passive mode во время работы.
 
 ## Альтернативы (кратко)
 - Попытаться сразу дочинить toggle через `NSPanel`: отклонено в этой итерации, т.к. растёт риск новых регрессий в lifecycle окна.
@@ -17,11 +18,13 @@
 ## Последствия
 - UX на macOS стал честнее: пользователь не видит вводящий в заблуждение control в overlay.
 - Функциональность временно урезана: runtime passive mode toggle недоступен до отдельного исправления.
+- Во время `npm run tauri dev` окно можно сделать интерактивным через `PLUELY_PASSIVE_DEFAULT=false npm run tauri dev`.
 - Приоритет разработки смещён в сторону стабильности окна, opacity и реальных hotkey-сценариев.
 
 ## Ссылки/файлы
 - `src-tauri/src/window.rs:61`
 - `src-tauri/src/window.rs:155`
+- `src-tauri/src/lib.rs:275`
 - `src/contexts/app.context.tsx:713`
 - `src/pages/shortcuts/components/shortcuts/ShortcutManager.tsx:211`
 - `src/pages/app/index.tsx:21`

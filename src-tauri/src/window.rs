@@ -1,8 +1,8 @@
-#[cfg(target_os = "macos")]
-use tauri::LogicalPosition;
 #[cfg(target_os = "linux")]
 use gtk::prelude::WidgetExt;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use tauri::LogicalPosition;
 use tauri::{App, AppHandle, Emitter, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
 use tauri_nspanel::ManagerExt;
@@ -17,7 +17,7 @@ pub struct PassiveModeState {
 impl Default for PassiveModeState {
     fn default() -> Self {
         Self {
-            enabled: AtomicBool::new(cfg!(target_os = "macos")),
+            enabled: AtomicBool::new(default_passive_mode()),
         }
     }
 }
@@ -47,15 +47,23 @@ pub fn setup_main_window(app: &mut App) -> Result<(), Box<dyn std::error::Error>
     position_window_top_center(&window, TOP_OFFSET)?;
 
     let passive_state = app.state::<PassiveModeState>();
-    passive_state.set(cfg!(target_os = "macos"));
+    let passive = default_passive_mode();
+    passive_state.set(passive);
 
     #[cfg(target_os = "macos")]
     {
-        apply_main_window_passive_mode(&window, true)
+        apply_main_window_passive_mode(&window, passive)
             .map_err(|error| format!("Failed to apply passive mode: {}", error))?;
     }
 
     Ok(())
+}
+
+fn default_passive_mode() -> bool {
+    match std::env::var("PLUELY_PASSIVE_DEFAULT") {
+        Ok(value) if value == "false" => false,
+        _ => cfg!(target_os = "macos"),
+    }
 }
 
 #[cfg(target_os = "macos")]

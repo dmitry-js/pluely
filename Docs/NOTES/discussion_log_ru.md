@@ -78,3 +78,10 @@
 - Следующие шаги: отдельно отполировать более мягкий macOS refocus без лишнего ощущения stealing focus.
 - Следующие шаги: прогнать keyboard-only smoke-test для `Esc`, `toggle_response_panel`, scroll shortcuts и `refocus input`.
 - Следующие шаги: продолжить стабилизацию общего window lifecycle на macOS без возврата к unsafe panel/window path.
+
+## 2026-04-30
+- Ключевые пункты: добавлен override стартового passive mode через переменную окружения `PLUELY_PASSIVE_DEFAULT=false`.
+- Ключевые пункты: `PassiveModeState::default()` и `setup_main_window` используют общее стартовое значение, чтобы state не перезаписывался старым macOS-дефолтом.
+- Ключевые пункты: инициализация macOS panel теперь берёт `set_ignore_mouse_events(...)` из backend state, поэтому dev-запуск может быть интерактивным.
+- Риски/вопросы: override не возвращает переключение passive mode во время работы; `Cmd+Shift+P` на macOS остаётся замороженным до panel-safe реализации.
+- Следующие шаги: проверить вручную `PLUELY_PASSIVE_DEFAULT=false npm run tauri dev` на macOS и обычный запуск без env.

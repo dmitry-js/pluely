@@ -8,6 +8,7 @@
 - Добавлен общий HTTP-клиент `reqwest` в state Tauri для переиспользования keep-alive соединений.
 - Screenshot-mode выделен в отдельный stateless AI-path: история не передаётся, изображения становятся основным контекстом, а prompt идёт отдельным `system_prompt`.
 - Runtime toggle passive/interactive mode на macOS временно заморожен: приоритет смещён в сторону стабильности окна и UX-консистентности.
+- Стартовый passive mode можно отключить переменной окружения `PLUELY_PASSIVE_DEFAULT=false` для разработки; поведение без переменной окружения остаётся прежним.
 
 ## Что обновлено в текущем цикле
 - Вынесен общий screenshot-pipeline в `src/lib/screenshot/`: константы, builder запроса и shared helper захвата без overlay:
@@ -62,6 +63,9 @@
 - Для main window сохранён backend state passive mode + команды `set_main_window_passive` / `get_main_window_passive`,
   но на macOS runtime toggle временно переведён в безопасный no-op до panel-safe реализации:
   `src-tauri/src/window.rs:13`, `src-tauri/src/window.rs:61`, `src-tauri/src/window.rs:155`.
+- Стартовое значение passive mode теперь читает `PLUELY_PASSIVE_DEFAULT` через `std::env::var`;
+  значение `false` отключает сквозные клики на старте, а без переменной окружения macOS остаётся passive по умолчанию:
+  `src-tauri/src/window.rs:17`, `src-tauri/src/window.rs:50`, `src-tauri/src/lib.rs:275`.
 - В существующую shortcut-систему сохранено действие `toggle_passive_mode` с дефолтом `Cmd/Ctrl+Shift+P`,
   но на macOS оно явно помечено как временно недоступное в UI настроек:
   `src/config/shortcuts.ts:85`, `src/pages/shortcuts/components/shortcuts/ShortcutManager.tsx:211`.
@@ -122,6 +126,7 @@
 - Для OpenAI добавлены диагностические backend-логи по длине ответа, фильтрации контекста и первому чанку.
 - Из-за временного mute shortcut-логов снижена диагностируемость проблем hotkeys.
 - Runtime passive mode toggle на macOS временно отключён; shortcut и overlay UI приведены к честному degraded state без ложных ожиданий.
+- Override через `PLUELY_PASSIVE_DEFAULT=false` нужен только для удобства dev-запуска (`npm run tauri dev`) и не возвращает переключение passive mode во время работы.
 - Native opacity на macOS теперь стабилен в обычном runtime path; следующая зона риска — window/panel lifecycle при show/hide и других hotkey flow.
 - На macOS остаётся follow-up на более мягкий `refocus input` behavior без ощущения жёсткого app-switch; это polish-задача, не текущий блокер.
 
