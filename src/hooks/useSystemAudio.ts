@@ -87,6 +87,13 @@ export interface ChatConversation {
   updatedAt: number;
 }
 
+interface QueuedSpeechSegment {
+  id: number;
+  audioBlob: Blob;
+  bytes: Uint8Array;
+  queuedAt: number;
+}
+
 export type useSystemAudioType = ReturnType<typeof useSystemAudio>;
 
 export function useSystemAudio() {
@@ -134,6 +141,10 @@ export function useSystemAudio() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const speechQueueRef = useRef<QueuedSpeechSegment[]>([]);
+  const isSpeechQueueProcessingRef = useRef<boolean>(false);
+  const speechSegmentCounterRef = useRef<number>(0);
+  const processSpeechQueueRef = useRef<() => void>(() => {});
 
   // Load context settings and VAD config from localStorage on mount
   useEffect(() => {
@@ -240,18 +251,17 @@ export function useSystemAudio() {
     };
   }, []);
 
-  // Handle single speech detection event (both VAD and continuous modes)
+  // Queue single speech detection events (both VAD and continuous modes)
   useEffect(() => {
     let speechUnlisten: (() => void) | undefined;
 
     const setupEventListener = async () => {
       try {
-        speechUnlisten = await listen("speech-detected", async (event) => {
+        speechUnlisten = await listen("speech-detected", (event) => {
           try {
             if (!capturing) return;
 
             const base64Audio = event.payload as string;
-            // Convert to blob
             const binaryString = atob(base64Audio);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
@@ -259,123 +269,26 @@ export function useSystemAudio() {
             }
             const audioBlob = new Blob([bytes], { type: "audio/wav" });
 
-            const usePluelyAPI = await shouldUsePluelyAPI();
-            if (!selectedSttProvider.provider && !usePluelyAPI) {
-              setError("No speech provider selected.");
-              return;
-            }
+            const segment: QueuedSpeechSegment = {
+              id: speechSegmentCounterRef.current + 1,
+              audioBlob,
+              bytes,
+              queuedAt: Date.now(),
+            };
+            speechSegmentCounterRef.current = segment.id;
+            speechQueueRef.current.push(segment);
 
-            const providerConfig = allSttProviders.find(
-              (p) => p.id === selectedSttProvider.provider
-            );
-
-            if (!providerConfig && !usePluelyAPI) {
-              setError("Speech provider config not found.");
-              return;
-            }
-
-            setIsProcessing(true);
-
-            const sttStartedAt = Date.now();
-            const sttProvider = usePluelyAPI
-              ? "pluely-api"
-              : providerConfig?.id || selectedSttProvider.provider || "unknown";
-            const sttModel =
-              selectedSttProvider.variables?.MODEL ||
-              selectedSttProvider.variables?.model ||
-              "unknown";
-            const estimatedDurationSeconds = estimateWavDurationSeconds(bytes);
-
-            console.debug("[stt] request start", {
-              provider: sttProvider,
-              model: sttModel,
+            console.debug("[stt] segment queued", {
+              segmentId: segment.id,
               audioBytes: audioBlob.size,
-              estimatedDurationSeconds,
-              timeoutMs: STT_TIMEOUT_MS,
-              startedAt: new Date(sttStartedAt).toISOString(),
+              estimatedDurationSeconds: estimateWavDurationSeconds(bytes),
+              queueLength: speechQueueRef.current.length,
+              queuedAt: new Date(segment.queuedAt).toISOString(),
             });
 
-            const sttPromise = fetchSTT({
-              provider: providerConfig,
-              selectedProvider: selectedSttProvider,
-              audio: audioBlob,
-            });
-
-            let timeoutId: ReturnType<typeof setTimeout> | undefined;
-            const timeoutPromise = new Promise<string>((_, reject) => {
-              timeoutId = setTimeout(() => {
-                const timeoutError = new Error(
-                  `Speech transcription timed out (${STT_TIMEOUT_MS / 1000}s)`
-                );
-                timeoutError.name = "STT_TIMEOUT";
-                reject(timeoutError);
-              }, STT_TIMEOUT_MS);
-            });
-
-            try {
-              const transcription = await Promise.race([
-                sttPromise,
-                timeoutPromise,
-              ]);
-              if (timeoutId) clearTimeout(timeoutId);
-
-              const sttEndedAt = Date.now();
-              console.debug("[stt] request success", {
-                provider: sttProvider,
-                model: sttModel,
-                audioBytes: audioBlob.size,
-                estimatedDurationSeconds,
-                durationMs: sttEndedAt - sttStartedAt,
-                transcriptChars: transcription.length,
-                endedAt: new Date(sttEndedAt).toISOString(),
-              });
-
-              if (transcription.trim()) {
-                setLastTranscription(transcription);
-                setError("");
-
-                const effectiveSystemPrompt = useSystemPrompt
-                  ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-                  : contextContent || DEFAULT_SYSTEM_PROMPT;
-
-                const previousMessages = conversation.messages.map((msg) => {
-                  return { role: msg.role, content: msg.content };
-                });
-
-                await processWithAI(
-                  transcription,
-                  effectiveSystemPrompt,
-                  previousMessages
-                );
-              } else {
-                setError("Received empty transcription");
-              }
-            } catch (sttError: any) {
-              if (timeoutId) clearTimeout(timeoutId);
-
-              const sttEndedAt = Date.now();
-              const logPayload = {
-                provider: sttProvider,
-                model: sttModel,
-                audioBytes: audioBlob.size,
-                estimatedDurationSeconds,
-                durationMs: sttEndedAt - sttStartedAt,
-                endedAt: new Date(sttEndedAt).toISOString(),
-                error: sttError?.message || String(sttError),
-              };
-
-              if (sttError?.name === "STT_TIMEOUT") {
-                console.warn("[stt] request timeout", logPayload);
-              } else {
-                console.error("[stt] request error", logPayload);
-              }
-              setError(sttError.message || "Failed to transcribe audio");
-              setIsPopoverOpen(true);
-            }
+            processSpeechQueueRef.current();
           } catch (err) {
             setError("Failed to process speech");
-          } finally {
-            setIsProcessing(false);
           }
         });
       } catch (err) {
@@ -388,12 +301,7 @@ export function useSystemAudio() {
     return () => {
       if (speechUnlisten) speechUnlisten();
     };
-  }, [
-    capturing,
-    selectedSttProvider,
-    allSttProviders,
-    conversation.messages.length,
-  ]);
+  }, [capturing]);
 
   // Context management functions
   const saveContextSettings = useCallback(
@@ -625,6 +533,185 @@ export function useSystemAudio() {
     [selectedAIProvider, allAiProviders, conversation.messages]
   );
 
+  const processSpeechSegment = useCallback(
+    async (segment: QueuedSpeechSegment) => {
+      try {
+        const usePluelyAPI = await shouldUsePluelyAPI();
+        if (!selectedSttProvider.provider && !usePluelyAPI) {
+          setError("No speech provider selected.");
+          return;
+        }
+
+        const providerConfig = allSttProviders.find(
+          (p) => p.id === selectedSttProvider.provider
+        );
+
+        if (!providerConfig && !usePluelyAPI) {
+          setError("Speech provider config not found.");
+          return;
+        }
+
+        const sttStartedAt = Date.now();
+        const sttProvider = usePluelyAPI
+          ? "pluely-api"
+          : providerConfig?.id || selectedSttProvider.provider || "unknown";
+        const sttModel =
+          selectedSttProvider.variables?.MODEL ||
+          selectedSttProvider.variables?.model ||
+          "unknown";
+        const estimatedDurationSeconds = estimateWavDurationSeconds(
+          segment.bytes
+        );
+
+        console.debug("[stt] request start", {
+          segmentId: segment.id,
+          provider: sttProvider,
+          model: sttModel,
+          audioBytes: segment.audioBlob.size,
+          estimatedDurationSeconds,
+          timeoutMs: STT_TIMEOUT_MS,
+          queueLength: speechQueueRef.current.length,
+          startedAt: new Date(sttStartedAt).toISOString(),
+        });
+
+        const sttPromise = fetchSTT({
+          provider: providerConfig,
+          selectedProvider: selectedSttProvider,
+          audio: segment.audioBlob,
+        });
+
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<string>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            const timeoutError = new Error(
+              `Speech transcription timed out (${STT_TIMEOUT_MS / 1000}s)`
+            );
+            timeoutError.name = "STT_TIMEOUT";
+            reject(timeoutError);
+          }, STT_TIMEOUT_MS);
+        });
+
+        try {
+          const transcription = await Promise.race([
+            sttPromise,
+            timeoutPromise,
+          ]);
+          if (timeoutId) clearTimeout(timeoutId);
+
+          const sttEndedAt = Date.now();
+          console.debug("[stt] request success", {
+            segmentId: segment.id,
+            provider: sttProvider,
+            model: sttModel,
+            audioBytes: segment.audioBlob.size,
+            estimatedDurationSeconds,
+            durationMs: sttEndedAt - sttStartedAt,
+            transcriptChars: transcription.length,
+            queueLength: speechQueueRef.current.length,
+            endedAt: new Date(sttEndedAt).toISOString(),
+          });
+
+          if (transcription.trim()) {
+            setLastTranscription(transcription);
+            setError("");
+
+            const effectiveSystemPrompt = useSystemPrompt
+              ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+              : contextContent || DEFAULT_SYSTEM_PROMPT;
+
+            const previousMessages = conversation.messages.map((msg) => {
+              return { role: msg.role, content: msg.content };
+            });
+
+            await processWithAI(
+              transcription,
+              effectiveSystemPrompt,
+              previousMessages
+            );
+          } else {
+            setError("Received empty transcription");
+          }
+        } catch (sttError: any) {
+          if (timeoutId) clearTimeout(timeoutId);
+
+          const sttEndedAt = Date.now();
+          const logPayload = {
+            segmentId: segment.id,
+            provider: sttProvider,
+            model: sttModel,
+            audioBytes: segment.audioBlob.size,
+            estimatedDurationSeconds,
+            durationMs: sttEndedAt - sttStartedAt,
+            queueLength: speechQueueRef.current.length,
+            endedAt: new Date(sttEndedAt).toISOString(),
+            error: sttError?.message || String(sttError),
+          };
+
+          if (sttError?.name === "STT_TIMEOUT") {
+            console.warn("[stt] request timeout", logPayload);
+          } else {
+            console.error("[stt] request error", logPayload);
+          }
+          setError(sttError.message || "Failed to transcribe audio");
+          setIsPopoverOpen(true);
+        }
+      } catch (err) {
+        setError("Failed to process speech");
+      }
+    },
+    [
+      selectedSttProvider,
+      allSttProviders,
+      useSystemPrompt,
+      systemPrompt,
+      contextContent,
+      conversation.messages,
+      processWithAI,
+    ]
+  );
+
+  const processSpeechQueue = useCallback(async () => {
+    if (isSpeechQueueProcessingRef.current) return;
+
+    isSpeechQueueProcessingRef.current = true;
+    setIsProcessing(true);
+
+    try {
+      while (speechQueueRef.current.length > 0) {
+        const segment = speechQueueRef.current.shift();
+        if (!segment) continue;
+
+        const processingStartedAt = Date.now();
+        console.debug("[stt] segment processing start", {
+          segmentId: segment.id,
+          audioBytes: segment.audioBlob.size,
+          queueLength: speechQueueRef.current.length,
+          queuedForMs: processingStartedAt - segment.queuedAt,
+          startedAt: new Date(processingStartedAt).toISOString(),
+        });
+
+        try {
+          await processSpeechSegment(segment);
+        } finally {
+          const processingEndedAt = Date.now();
+          console.debug("[stt] segment processing done", {
+            segmentId: segment.id,
+            durationMs: processingEndedAt - processingStartedAt,
+            queueLength: speechQueueRef.current.length,
+            endedAt: new Date(processingEndedAt).toISOString(),
+          });
+        }
+      }
+    } finally {
+      isSpeechQueueProcessingRef.current = false;
+      setIsProcessing(false);
+    }
+  }, [processSpeechSegment]);
+
+  processSpeechQueueRef.current = () => {
+    void processSpeechQueue();
+  };
+
   const startCapture = useCallback(async () => {
     try {
       setError("");
@@ -640,6 +727,8 @@ export function useSystemAudio() {
 
       // Set up conversation
       const conversationId = generateConversationId("sysaudio");
+      speechQueueRef.current = [];
+      speechSegmentCounterRef.current = 0;
       setConversation({
         id: conversationId,
         title: "",
@@ -692,6 +781,7 @@ export function useSystemAudio() {
       await invoke<string>("stop_system_audio_capture");
 
       // Reset ALL states
+      speechQueueRef.current = [];
       setCapturing(false);
       setIsProcessing(false);
       setIsAIProcessing(false);
@@ -839,6 +929,8 @@ export function useSystemAudio() {
   ]);
 
   const startNewConversation = useCallback(() => {
+    speechQueueRef.current = [];
+    speechSegmentCounterRef.current = 0;
     setConversation({
       id: generateConversationId("sysaudio"),
       title: "",
