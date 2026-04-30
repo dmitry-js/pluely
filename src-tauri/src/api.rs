@@ -425,7 +425,40 @@ pub async fn transcribe_audio(
     app: AppHandle,
     audio_base64: String,
     transcription_prompt: Option<String>,
+    openai_whisper_token: Option<String>,
+    openai_whisper_model: Option<String>,
 ) -> Result<AudioResponse, String> {
+    let audio_bytes = decode_audio_base64(&audio_base64)?;
+    let client = reqwest::Client::new();
+
+    if let Some(token) = openai_whisper_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let model = openai_whisper_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("whisper-1");
+
+        return perform_user_audio_transcription(
+            &client,
+            "https://api.openai.com/v1/audio/transcriptions",
+            token,
+            model,
+            None,
+            &audio_bytes,
+            transcription_prompt.as_deref(),
+        )
+        .await
+        .map(|transcription| AudioResponse {
+            success: true,
+            transcription: Some(transcription),
+            error: None,
+        });
+    }
+
     let (_, _, selected_model) = get_stored_credentials(&app).await?;
     let provider = selected_model.as_ref().map(|model| model.provider.clone());
     let model = selected_model.as_ref().map(|model| model.model.clone());
@@ -436,8 +469,6 @@ pub async fn transcribe_audio(
             .to_string()
     })?;
 
-    let audio_bytes = decode_audio_base64(&audio_base64)?;
-    let client = reqwest::Client::new();
     let error_provider = provider.clone();
     let error_model = model.clone();
     match perform_user_audio_transcription(

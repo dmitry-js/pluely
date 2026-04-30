@@ -13,7 +13,8 @@ import { shouldUsePluelyAPI } from "./pluely.api";
 // Pluely STT function
 async function fetchPluelySTT(
   audio: File | Blob,
-  transcriptionPrompt?: string
+  transcriptionPrompt?: string,
+  openaiWhisperConfig?: { token: string; model: string }
 ): Promise<string> {
   try {
     // Convert audio to base64
@@ -27,16 +28,18 @@ async function fetchPluelySTT(
     }>("transcribe_audio", {
       audioBase64,
       transcriptionPrompt,
+      openaiWhisperToken: openaiWhisperConfig?.token,
+      openaiWhisperModel: openaiWhisperConfig?.model,
     });
 
     if (response.success && response.transcription) {
       return response.transcription;
-    } else {
-      return response.error || "Transcription failed";
     }
+
+    throw new Error(response.error || "Transcription failed");
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return `Pluely STT Error: ${errorMessage}`;
+    throw new Error(`Backend STT Error: ${errorMessage}`);
   }
 }
 
@@ -89,6 +92,20 @@ export async function fetchSTT(params: STTParams): Promise<string> {
     const usePluelyAPI = await shouldUsePluelyAPI();
     if (usePluelyAPI) {
       return await fetchPluelySTT(audio, transcriptionPrompt);
+    }
+
+    if (provider?.id === "openai-whisper") {
+      const token = allVariables.API_KEY?.trim();
+      const model = allVariables.MODEL?.trim() || "whisper-1";
+
+      if (!token) {
+        throw new Error("OpenAI Whisper API key is required");
+      }
+
+      return await fetchPluelySTT(audio, transcriptionPrompt, {
+        token,
+        model,
+      });
     }
 
     if (!provider) throw new Error("Provider not provided");
