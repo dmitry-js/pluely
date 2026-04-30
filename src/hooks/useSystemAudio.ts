@@ -46,6 +46,30 @@ const DEFAULT_VAD_CONFIG: VadConfig = {
   max_recording_duration_secs: 180, // 3 minutes default
 };
 
+const STT_TIMEOUT_MS = 30000;
+
+const estimateWavDurationSeconds = (bytes: Uint8Array): number | null => {
+  if (bytes.length < 44) return null;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const byteRate = view.getUint32(28, true);
+  if (!byteRate) return null;
+
+  for (let i = 12; i <= bytes.length - 8; i += 1) {
+    if (
+      bytes[i] === 0x64 &&
+      bytes[i + 1] === 0x61 &&
+      bytes[i + 2] === 0x74 &&
+      bytes[i + 3] === 0x61
+    ) {
+      const dataSize = view.getUint32(i + 4, true);
+      return dataSize / byteRate;
+    }
+  }
+
+  return null;
+};
+
 // Chat message interface (reusing from useCompletion)
 interface ChatMessage {
   id: string;
@@ -252,18 +276,40 @@ export function useSystemAudio() {
 
             setIsProcessing(true);
 
-            // Add timeout wrapper for STT request (30 seconds)
+            const sttStartedAt = Date.now();
+            const sttProvider = usePluelyAPI
+              ? "pluely-api"
+              : providerConfig?.id || selectedSttProvider.provider || "unknown";
+            const sttModel =
+              selectedSttProvider.variables?.MODEL ||
+              selectedSttProvider.variables?.model ||
+              "unknown";
+            const estimatedDurationSeconds = estimateWavDurationSeconds(bytes);
+
+            console.debug("[stt] request start", {
+              provider: sttProvider,
+              model: sttModel,
+              audioBytes: audioBlob.size,
+              estimatedDurationSeconds,
+              timeoutMs: STT_TIMEOUT_MS,
+              startedAt: new Date(sttStartedAt).toISOString(),
+            });
+
             const sttPromise = fetchSTT({
               provider: providerConfig,
               selectedProvider: selectedSttProvider,
               audio: audioBlob,
             });
 
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
             const timeoutPromise = new Promise<string>((_, reject) => {
-              setTimeout(
-                () => reject(new Error("Speech transcription timed out (30s)")),
-                30000
-              );
+              timeoutId = setTimeout(() => {
+                const timeoutError = new Error(
+                  `Speech transcription timed out (${STT_TIMEOUT_MS / 1000}s)`
+                );
+                timeoutError.name = "STT_TIMEOUT";
+                reject(timeoutError);
+              }, STT_TIMEOUT_MS);
             });
 
             try {
@@ -271,6 +317,18 @@ export function useSystemAudio() {
                 sttPromise,
                 timeoutPromise,
               ]);
+              if (timeoutId) clearTimeout(timeoutId);
+
+              const sttEndedAt = Date.now();
+              console.debug("[stt] request success", {
+                provider: sttProvider,
+                model: sttModel,
+                audioBytes: audioBlob.size,
+                estimatedDurationSeconds,
+                durationMs: sttEndedAt - sttStartedAt,
+                transcriptChars: transcription.length,
+                endedAt: new Date(sttEndedAt).toISOString(),
+              });
 
               if (transcription.trim()) {
                 setLastTranscription(transcription);
@@ -293,7 +351,24 @@ export function useSystemAudio() {
                 setError("Received empty transcription");
               }
             } catch (sttError: any) {
-              console.error("STT Error:", sttError);
+              if (timeoutId) clearTimeout(timeoutId);
+
+              const sttEndedAt = Date.now();
+              const logPayload = {
+                provider: sttProvider,
+                model: sttModel,
+                audioBytes: audioBlob.size,
+                estimatedDurationSeconds,
+                durationMs: sttEndedAt - sttStartedAt,
+                endedAt: new Date(sttEndedAt).toISOString(),
+                error: sttError?.message || String(sttError),
+              };
+
+              if (sttError?.name === "STT_TIMEOUT") {
+                console.warn("[stt] request timeout", logPayload);
+              } else {
+                console.error("[stt] request error", logPayload);
+              }
               setError(sttError.message || "Failed to transcribe audio");
               setIsPopoverOpen(true);
             }
