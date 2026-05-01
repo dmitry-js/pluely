@@ -48,6 +48,8 @@ const DEFAULT_VAD_CONFIG: VadConfig = {
 
 const STT_TIMEOUT_MS = 60000;
 const AUDIO_AI_DEBOUNCE_MS = 2000;
+const SYSTEM_AUDIO_SETTINGS_CHANGED_EVENT = "system-audio-settings-changed";
+const MANUAL_AUDIO_ANSWER_EVENT = "manual-audio-answer-request";
 
 const estimateWavDurationSeconds = (bytes: Uint8Array): number | null => {
   if (bytes.length < 44) return null;
@@ -113,6 +115,8 @@ export function useSystemAudio() {
     useState<boolean>(false);
   const [showQuickActions, setShowQuickActions] = useState<boolean>(true);
   const [vadConfig, setVadConfig] = useState<VadConfig>(DEFAULT_VAD_CONFIG);
+  const [autoGenerateAudioAnswers, setAutoGenerateAudioAnswers] =
+    useState<boolean>(false);
   const [recordingProgress, setRecordingProgress] = useState<number>(0); // For continuous mode
   const [isContinuousMode, setIsContinuousMode] = useState<boolean>(false);
   const [isRecordingInContinuousMode, setIsRecordingInContinuousMode] =
@@ -151,6 +155,7 @@ export function useSystemAudio() {
     null
   );
   const isAIProcessingRef = useRef<boolean>(false);
+  const autoGenerateAudioAnswersRef = useRef<boolean>(false);
   const flushPendingTranscriptRef = useRef<() => Promise<void>>(async () => {});
   const scheduleAudioAIResponseRef = useRef<(reason?: string) => void>(
     () => {}
@@ -181,6 +186,43 @@ export function useSystemAudio() {
         console.error("Failed to load VAD config:", error);
       }
     }
+
+    const savedAudioSettings = safeLocalStorage.getItem(
+      STORAGE_KEYS.SYSTEM_AUDIO_SETTINGS
+    );
+    if (savedAudioSettings) {
+      try {
+        const parsed = JSON.parse(savedAudioSettings);
+        const enabled = parsed.autoGenerateAudioAnswers === true;
+        autoGenerateAudioAnswersRef.current = enabled;
+        setAutoGenerateAudioAnswers(enabled);
+      } catch (error) {
+        console.error("Failed to load system audio settings:", error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleSettingsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ autoGenerateAudioAnswers?: boolean }>)
+        .detail;
+      if (typeof detail?.autoGenerateAudioAnswers !== "boolean") return;
+
+      autoGenerateAudioAnswersRef.current = detail.autoGenerateAudioAnswers;
+      setAutoGenerateAudioAnswers(detail.autoGenerateAudioAnswers);
+    };
+
+    window.addEventListener(
+      SYSTEM_AUDIO_SETTINGS_CHANGED_EVENT,
+      handleSettingsChanged
+    );
+
+    return () => {
+      window.removeEventListener(
+        SYSTEM_AUDIO_SETTINGS_CHANGED_EVENT,
+        handleSettingsChanged
+      );
+    };
   }, []);
 
   // Load quick actions from localStorage on mount
@@ -347,6 +389,20 @@ export function useSystemAudio() {
     },
     [useSystemPrompt, saveContextSettings]
   );
+
+  const updateAutoGenerateAudioAnswers = useCallback((enabled: boolean) => {
+    autoGenerateAudioAnswersRef.current = enabled;
+    setAutoGenerateAudioAnswers(enabled);
+    safeLocalStorage.setItem(
+      STORAGE_KEYS.SYSTEM_AUDIO_SETTINGS,
+      JSON.stringify({ autoGenerateAudioAnswers: enabled })
+    );
+    window.dispatchEvent(
+      new CustomEvent(SYSTEM_AUDIO_SETTINGS_CHANGED_EVENT, {
+        detail: { autoGenerateAudioAnswers: enabled },
+      })
+    );
+  }, []);
 
   // Quick actions management
   const saveQuickActions = useCallback((actions: string[]) => {
@@ -636,7 +692,10 @@ export function useSystemAudio() {
         endedAt: new Date(endedAt).toISOString(),
       });
 
-      if (pendingTranscriptRef.current.trim()) {
+      if (
+        autoGenerateAudioAnswersRef.current &&
+        pendingTranscriptRef.current.trim()
+      ) {
         scheduleAudioAIResponseRef.current("pending-after-ai");
       }
     }
@@ -649,6 +708,44 @@ export function useSystemAudio() {
   ]);
 
   flushPendingTranscriptRef.current = flushPendingTranscript;
+
+  useEffect(() => {
+    const handleManualAudioAnswerRequest = (event: Event) => {
+      const pendingTranscript = pendingTranscriptRef.current.trim();
+
+      console.debug("[audio-ai] manual audio answer requested", {
+        pendingTranscriptChars: pendingTranscript.length,
+        queueLength: speechQueueRef.current.length,
+        isAIProcessing: isAIProcessingRef.current,
+      });
+
+      if (!pendingTranscript) {
+        console.debug("[audio-ai] no pending transcript for manual answer");
+        return;
+      }
+
+      event.preventDefault();
+
+      if (audioAiDebounceRef.current) {
+        clearTimeout(audioAiDebounceRef.current);
+        audioAiDebounceRef.current = null;
+      }
+
+      void flushPendingTranscriptRef.current();
+    };
+
+    window.addEventListener(
+      MANUAL_AUDIO_ANSWER_EVENT,
+      handleManualAudioAnswerRequest
+    );
+
+    return () => {
+      window.removeEventListener(
+        MANUAL_AUDIO_ANSWER_EVENT,
+        handleManualAudioAnswerRequest
+      );
+    };
+  }, []);
 
   const appendPendingTranscript = useCallback(
     (transcription: string, segmentId: number) => {
@@ -672,7 +769,15 @@ export function useSystemAudio() {
         queueLength: speechQueueRef.current.length,
       });
 
-      scheduleAudioAIResponseRef.current("transcript-appended");
+      if (autoGenerateAudioAnswersRef.current) {
+        scheduleAudioAIResponseRef.current("transcript-appended");
+      } else {
+        console.debug("[audio-ai] transcript appended with auto-generate disabled", {
+          segmentId,
+          pendingTranscriptChars: pendingTranscriptRef.current.length,
+          queueLength: speechQueueRef.current.length,
+        });
+      }
     },
     []
   );
@@ -1209,6 +1314,8 @@ export function useSystemAudio() {
     setUseSystemPrompt: updateUseSystemPrompt,
     contextContent,
     setContextContent: updateContextContent,
+    autoGenerateAudioAnswers,
+    setAutoGenerateAudioAnswers: updateAutoGenerateAudioAnswers,
     startNewConversation,
     // Window resize
     resizeWindow,

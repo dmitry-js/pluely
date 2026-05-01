@@ -819,6 +819,14 @@ export const useChatCompletion = (
   useEffect(() => {
     const shortcutActionId = "submit_screenshots";
     globalShortcuts.registerCustomShortcutCallback(shortcutActionId, () => {
+      const audioAnswerEvent = new CustomEvent("manual-audio-answer-request", {
+        cancelable: true,
+      });
+      window.dispatchEvent(audioAnswerEvent);
+      if (audioAnswerEvent.defaultPrevented) {
+        return;
+      }
+
       if (
         screenshotConfiguration.mode === "manual" &&
         state.attachedFiles.some((file) => file.type.startsWith("image/"))

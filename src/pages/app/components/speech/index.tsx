@@ -44,6 +44,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
     setUseSystemPrompt,
     contextContent,
     setContextContent,
+    autoGenerateAudioAnswers,
+    setAutoGenerateAudioAnswers,
     startNewConversation,
     conversation,
     resizeWindow,
@@ -365,6 +367,10 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       setUseSystemPrompt={setUseSystemPrompt}
                       contextContent={contextContent}
                       setContextContent={setContextContent}
+                      autoGenerateAudioAnswers={autoGenerateAudioAnswers}
+                      setAutoGenerateAudioAnswers={
+                        setAutoGenerateAudioAnswers
+                      }
                     />
 
                     {/* Help/Keyboard Shortcuts */}

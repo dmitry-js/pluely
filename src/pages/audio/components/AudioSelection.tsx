@@ -5,6 +5,8 @@ import {
   SelectTrigger,
   Header,
   Button,
+  Label,
+  Switch,
 } from "@/components";
 import { MicIcon, RefreshCwIcon, HeadphonesIcon } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -17,6 +19,8 @@ export const AudioSelection = () => {
   const { selectedAudioDevices, setSelectedAudioDevices } = useApp();
 
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const [autoGenerateAudioAnswers, setAutoGenerateAudioAnswers] =
+    useState(false);
   const [showSuccess, setShowSuccess] = useState<{
     input: boolean;
     output: boolean;
@@ -107,7 +111,31 @@ export const AudioSelection = () => {
 
   useEffect(() => {
     loadAudioDevices();
+    const savedSettings = safeLocalStorage.getItem(
+      STORAGE_KEYS.SYSTEM_AUDIO_SETTINGS
+    );
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setAutoGenerateAudioAnswers(parsed.autoGenerateAudioAnswers === true);
+      } catch (error) {
+        console.error("Failed to load system audio settings:", error);
+      }
+    }
   }, []);
+
+  const handleAutoGenerateChange = (enabled: boolean) => {
+    setAutoGenerateAudioAnswers(enabled);
+    safeLocalStorage.setItem(
+      STORAGE_KEYS.SYSTEM_AUDIO_SETTINGS,
+      JSON.stringify({ autoGenerateAudioAnswers: enabled })
+    );
+    window.dispatchEvent(
+      new CustomEvent("system-audio-settings-changed", {
+        detail: { autoGenerateAudioAnswers: enabled },
+      })
+    );
+  };
 
   // Handle device selection changes
   const handleDeviceChange = (type: "input" | "output", deviceId: string) => {
@@ -236,6 +264,21 @@ export const AudioSelection = () => {
         />
 
         <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border/50 p-3">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">
+                Auto-generate audio answers
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                When disabled, transcripts accumulate until you press Cmd+Enter.
+              </p>
+            </div>
+            <Switch
+              checked={autoGenerateAudioAnswers}
+              onCheckedChange={handleAutoGenerateChange}
+            />
+          </div>
+
           {/* Output Selection Dropdown */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">

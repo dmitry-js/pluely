@@ -60,6 +60,8 @@ interface SettingsPanelProps {
   setUseSystemPrompt: (value: boolean) => void;
   contextContent: string;
   setContextContent: (content: string) => void;
+  autoGenerateAudioAnswers: boolean;
+  setAutoGenerateAudioAnswers: (value: boolean) => void;
 }
 
 export const SettingsPanel = ({
@@ -69,6 +71,8 @@ export const SettingsPanel = ({
   setUseSystemPrompt,
   contextContent,
   setContextContent,
+  autoGenerateAudioAnswers,
+  setAutoGenerateAudioAnswers,
 }: SettingsPanelProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -219,6 +223,23 @@ export const SettingsPanel = ({
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               AI Context
             </h4>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <Label className="text-xs font-medium">
+                  Auto-generate audio answers
+                </Label>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {autoGenerateAudioAnswers
+                    ? "Answers are generated after transcription pauses"
+                    : "Use Cmd+Enter when ready to answer"}
+                </p>
+              </div>
+              <Switch
+                checked={autoGenerateAudioAnswers}
+                onCheckedChange={setAutoGenerateAudioAnswers}
+              />
+            </div>
 
             <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
