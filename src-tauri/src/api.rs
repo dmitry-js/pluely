@@ -5,10 +5,11 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
+use std::error::Error as StdError;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_machine_uid::MachineUidExt;
 
@@ -20,6 +21,8 @@ const OPENAI_SHORT_SCREENSHOT_MAX_OUTPUT_TOKENS: i64 = 800;
 const OPENAI_SHORT_CODE_INTENT_MAX_OUTPUT_TOKENS: i64 = 450;
 const OPENAI_MEDIUM_MAX_OUTPUT_TOKENS: i64 = 600;
 const OPENAI_AUTO_MAX_OUTPUT_TOKENS: i64 = 800;
+const STT_BACKEND_TIMEOUT_SECS: u64 = 60;
+const STT_BACKEND_MAX_SEND_ATTEMPTS: usize = 2;
 static OPENAI_WARMUP_STARTED: AtomicBool = AtomicBool::new(false);
 static OPENAI_WARMUP_DISABLED: AtomicBool = AtomicBool::new(false);
 static OPENAI_CHAT_REQUEST_STARTED: AtomicBool = AtomicBool::new(false);
@@ -672,6 +675,135 @@ async fn perform_user_audio_transcription(
     audio_bytes: &[u8],
     transcription_prompt: Option<&str>,
 ) -> Result<String, String> {
+    let endpoint = describe_endpoint(url);
+    let prompt_present = is_openai_whisper_transcription(url, model)
+        && transcription_prompt
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some();
+
+    for attempt in 1..=STT_BACKEND_MAX_SEND_ATTEMPTS {
+        let form = build_user_audio_transcription_form(
+            url,
+            model,
+            headers,
+            audio_bytes,
+            transcription_prompt,
+        )?;
+
+        let response_result = client
+            .post(url)
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(STT_BACKEND_TIMEOUT_SECS))
+            .multipart(form)
+            .send()
+            .await;
+
+        let response = match response_result {
+            Ok(response) => response,
+            Err(error) => {
+                let category = describe_reqwest_error_category(&error);
+                let sources = reqwest_error_sources(&error);
+                let should_retry =
+                    attempt < STT_BACKEND_MAX_SEND_ATTEMPTS && is_retryable_stt_send_error(&error);
+
+                tracing::warn!(
+                    endpoint_host = %endpoint.0,
+                    endpoint_path = %endpoint.1,
+                    model = %model,
+                    audio_bytes = audio_bytes.len(),
+                    prompt_present = prompt_present,
+                    attempt = attempt,
+                    max_attempts = STT_BACKEND_MAX_SEND_ATTEMPTS,
+                    timeout_secs = STT_BACKEND_TIMEOUT_SECS,
+                    error_category = %category,
+                    error = %error,
+                    error_sources = ?sources,
+                    retrying = should_retry,
+                    "Audio transcription request failed to send"
+                );
+
+                if should_retry {
+                    continue;
+                }
+
+                return Err(format!(
+                    "Transcription request failed to send: endpoint={}{} model={} audio_bytes={} prompt_present={} timeout_secs={} category={} error={} sources={}",
+                    endpoint.0,
+                    endpoint.1,
+                    model,
+                    audio_bytes.len(),
+                    prompt_present,
+                    STT_BACKEND_TIMEOUT_SECS,
+                    category,
+                    error,
+                    format_error_sources(&sources)
+                ));
+            }
+        };
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read transcription error response".to_string());
+
+            tracing::warn!(
+                endpoint_host = %endpoint.0,
+                endpoint_path = %endpoint.1,
+                model = %model,
+                audio_bytes = audio_bytes.len(),
+                prompt_present = prompt_present,
+                status = %status,
+                response_body = %error_text,
+                "Audio transcription request returned error status"
+            );
+
+            return Err(format!(
+                "Transcription request returned {} from {}{} with body: {}",
+                status, endpoint.0, endpoint.1, error_text
+            ));
+        }
+
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read transcription response: {}", e))?;
+
+        if body_text.trim().is_empty() {
+            return Err("Transcription response was empty".to_string());
+        }
+
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_text) {
+            if let Some(text) = json.get("text").and_then(|value| value.as_str()) {
+                return Ok(text.to_string());
+            }
+
+            if let Some(text) = json
+                .get("transcription")
+                .and_then(|value| value.as_str())
+                .or_else(|| json.get("result").and_then(|value| value.as_str()))
+            {
+                return Ok(text.to_string());
+            }
+
+            return Ok(json.to_string());
+        }
+
+        return Ok(body_text);
+    }
+
+    Err("Transcription request failed before a response was received".to_string())
+}
+
+fn build_user_audio_transcription_form(
+    url: &str,
+    model: &str,
+    headers: Option<&Vec<UserAudioHeader>>,
+    audio_bytes: &[u8],
+    transcription_prompt: Option<&str>,
+) -> Result<Form, String> {
     let audio_part = Part::bytes(audio_bytes.to_vec())
         .file_name("audio.wav")
         .mime_str("audio/wav")
@@ -701,52 +833,57 @@ async fn perform_user_audio_transcription(
         }
     }
 
-    let response = client
-        .post(url)
-        .bearer_auth(token)
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| format!("Transcription request failed to send: {}", e))?;
+    Ok(form)
+}
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unable to read transcription error response".to_string());
-        return Err(format!(
-            "Transcription request returned {} with body: {}",
-            status, error_text
-        ));
+fn describe_endpoint(url: &str) -> (String, String) {
+    match Url::parse(url) {
+        Ok(parsed) => (
+            parsed.host_str().unwrap_or("unknown-host").to_string(),
+            parsed.path().to_string(),
+        ),
+        Err(_) => ("invalid-url".to_string(), url.to_string()),
+    }
+}
+
+fn describe_reqwest_error_category(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_body() {
+        "body"
+    } else if error.is_request() {
+        "send"
+    } else if error.is_decode() {
+        "decode"
+    } else {
+        "unknown"
+    }
+}
+
+fn is_retryable_stt_send_error(error: &reqwest::Error) -> bool {
+    error.is_timeout() || error.is_connect() || error.is_request()
+}
+
+fn reqwest_error_sources(error: &reqwest::Error) -> Vec<String> {
+    let mut sources = Vec::new();
+    let mut source = error.source();
+
+    while let Some(current) = source {
+        sources.push(current.to_string());
+        source = current.source();
     }
 
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read transcription response: {}", e))?;
+    sources
+}
 
-    if body_text.trim().is_empty() {
-        return Err("Transcription response was empty".to_string());
+fn format_error_sources(sources: &[String]) -> String {
+    if sources.is_empty() {
+        "none".to_string()
+    } else {
+        sources.join(" | ")
     }
-
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_text) {
-        if let Some(text) = json.get("text").and_then(|value| value.as_str()) {
-            return Ok(text.to_string());
-        }
-
-        if let Some(text) = json
-            .get("transcription")
-            .and_then(|value| value.as_str())
-            .or_else(|| json.get("result").and_then(|value| value.as_str()))
-        {
-            return Ok(text.to_string());
-        }
-
-        return Ok(json.to_string());
-    }
-
-    Ok(body_text)
 }
 
 fn is_openai_whisper_transcription(url: &str, model: &str) -> bool {

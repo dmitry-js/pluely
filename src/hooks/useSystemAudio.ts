@@ -46,7 +46,7 @@ const DEFAULT_VAD_CONFIG: VadConfig = {
   max_recording_duration_secs: 180, // 3 minutes default
 };
 
-const STT_TIMEOUT_MS = 30000;
+const STT_TIMEOUT_MS = 60000;
 const AUDIO_AI_DEBOUNCE_MS = 2000;
 
 const estimateWavDurationSeconds = (bytes: Uint8Array): number | null => {
