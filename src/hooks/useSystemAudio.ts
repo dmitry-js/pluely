@@ -47,6 +47,7 @@ const DEFAULT_VAD_CONFIG: VadConfig = {
 };
 
 const STT_TIMEOUT_MS = 30000;
+const AUDIO_AI_DEBOUNCE_MS = 2000;
 
 const estimateWavDurationSeconds = (bytes: Uint8Array): number | null => {
   if (bytes.length < 44) return null;
@@ -145,6 +146,15 @@ export function useSystemAudio() {
   const isSpeechQueueProcessingRef = useRef<boolean>(false);
   const speechSegmentCounterRef = useRef<number>(0);
   const processSpeechQueueRef = useRef<() => void>(() => {});
+  const pendingTranscriptRef = useRef<string>("");
+  const audioAiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const isAIProcessingRef = useRef<boolean>(false);
+  const flushPendingTranscriptRef = useRef<() => Promise<void>>(async () => {});
+  const scheduleAudioAIResponseRef = useRef<(reason?: string) => void>(
+    () => {}
+  );
 
   // Load context settings and VAD config from localStorage on mount
   useEffect(() => {
@@ -441,6 +451,12 @@ export function useSystemAudio() {
       await invoke<string>("stop_system_audio_capture");
 
       // Reset states
+      speechQueueRef.current = [];
+      pendingTranscriptRef.current = "";
+      if (audioAiDebounceRef.current) {
+        clearTimeout(audioAiDebounceRef.current);
+        audioAiDebounceRef.current = null;
+      }
       setRecordingProgress(0);
       setIsProcessing(false);
       setIsRecordingInContinuousMode(false);
@@ -464,6 +480,7 @@ export function useSystemAudio() {
       abortControllerRef.current = new AbortController();
 
       try {
+        isAIProcessingRef.current = true;
         setIsAIProcessing(true);
         setLastAIResponse("");
         setError("");
@@ -526,11 +543,138 @@ export function useSystemAudio() {
       } catch (err) {
         setError("Failed to get AI response");
       } finally {
+        isAIProcessingRef.current = false;
         setIsAIProcessing(false);
         // No auto-restart - user manually controls when to start next recording
       }
     },
     [selectedAIProvider, allAiProviders, conversation.messages]
+  );
+
+  const scheduleAudioAIResponse = useCallback((reason = "transcript") => {
+    const wasScheduled = !!audioAiDebounceRef.current;
+    if (audioAiDebounceRef.current) {
+      clearTimeout(audioAiDebounceRef.current);
+    }
+
+    const scheduledAt = Date.now();
+    console.debug(
+      wasScheduled
+        ? "[audio-ai] debounce reset"
+        : "[audio-ai] debounce scheduled",
+      {
+        reason,
+        debounceMs: AUDIO_AI_DEBOUNCE_MS,
+        pendingTranscriptChars: pendingTranscriptRef.current.length,
+        scheduledAt: new Date(scheduledAt).toISOString(),
+      }
+    );
+
+    audioAiDebounceRef.current = setTimeout(() => {
+      audioAiDebounceRef.current = null;
+      void flushPendingTranscriptRef.current();
+    }, AUDIO_AI_DEBOUNCE_MS);
+  }, []);
+
+  scheduleAudioAIResponseRef.current = scheduleAudioAIResponse;
+
+  const flushPendingTranscript = useCallback(async () => {
+    const aggregatedTranscript = pendingTranscriptRef.current.trim();
+    if (!aggregatedTranscript) return;
+
+    if (
+      isSpeechQueueProcessingRef.current ||
+      speechQueueRef.current.length > 0
+    ) {
+      console.debug("[audio-ai] waiting for stt queue", {
+        pendingTranscriptChars: aggregatedTranscript.length,
+        queueLength: speechQueueRef.current.length,
+        debounceMs: AUDIO_AI_DEBOUNCE_MS,
+      });
+      scheduleAudioAIResponseRef.current("stt-processing");
+      return;
+    }
+
+    if (isAIProcessingRef.current) {
+      console.debug("[audio-ai] processing already active", {
+        pendingTranscriptChars: aggregatedTranscript.length,
+        debounceMs: AUDIO_AI_DEBOUNCE_MS,
+      });
+      scheduleAudioAIResponseRef.current("ai-processing");
+      return;
+    }
+
+    pendingTranscriptRef.current = "";
+    setLastTranscription(aggregatedTranscript);
+
+    const startedAt = Date.now();
+    console.debug("[audio-ai] processing started", {
+      transcriptChars: aggregatedTranscript.length,
+      startedAt: new Date(startedAt).toISOString(),
+    });
+
+    const effectiveSystemPrompt = useSystemPrompt
+      ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+      : contextContent || DEFAULT_SYSTEM_PROMPT;
+
+    const previousMessages = conversation.messages.map((msg) => {
+      return { role: msg.role, content: msg.content };
+    });
+
+    try {
+      await processWithAI(
+        aggregatedTranscript,
+        effectiveSystemPrompt,
+        previousMessages
+      );
+    } finally {
+      const endedAt = Date.now();
+      console.debug("[audio-ai] processing finished", {
+        transcriptChars: aggregatedTranscript.length,
+        durationMs: endedAt - startedAt,
+        pendingTranscriptChars: pendingTranscriptRef.current.length,
+        endedAt: new Date(endedAt).toISOString(),
+      });
+
+      if (pendingTranscriptRef.current.trim()) {
+        scheduleAudioAIResponseRef.current("pending-after-ai");
+      }
+    }
+  }, [
+    useSystemPrompt,
+    systemPrompt,
+    contextContent,
+    conversation.messages,
+    processWithAI,
+  ]);
+
+  flushPendingTranscriptRef.current = flushPendingTranscript;
+
+  const appendPendingTranscript = useCallback(
+    (transcription: string, segmentId: number) => {
+      const trimmedTranscript = transcription.trim();
+      if (!trimmedTranscript) return;
+
+      pendingTranscriptRef.current = [
+        pendingTranscriptRef.current.trim(),
+        trimmedTranscript,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      setLastTranscription(pendingTranscriptRef.current);
+      setError("");
+
+      console.debug("[audio-ai] transcript appended", {
+        segmentId,
+        transcriptChars: trimmedTranscript.length,
+        pendingTranscriptChars: pendingTranscriptRef.current.length,
+        queueLength: speechQueueRef.current.length,
+      });
+
+      scheduleAudioAIResponseRef.current("transcript-appended");
+    },
+    []
   );
 
   const processSpeechSegment = useCallback(
@@ -612,22 +756,7 @@ export function useSystemAudio() {
           });
 
           if (transcription.trim()) {
-            setLastTranscription(transcription);
-            setError("");
-
-            const effectiveSystemPrompt = useSystemPrompt
-              ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-              : contextContent || DEFAULT_SYSTEM_PROMPT;
-
-            const previousMessages = conversation.messages.map((msg) => {
-              return { role: msg.role, content: msg.content };
-            });
-
-            await processWithAI(
-              transcription,
-              effectiveSystemPrompt,
-              previousMessages
-            );
+            appendPendingTranscript(transcription, segment.id);
           } else {
             setError("Received empty transcription");
           }
@@ -659,15 +788,7 @@ export function useSystemAudio() {
         setError("Failed to process speech");
       }
     },
-    [
-      selectedSttProvider,
-      allSttProviders,
-      useSystemPrompt,
-      systemPrompt,
-      contextContent,
-      conversation.messages,
-      processWithAI,
-    ]
+    [selectedSttProvider, allSttProviders, appendPendingTranscript]
   );
 
   const processSpeechQueue = useCallback(async () => {
@@ -729,6 +850,11 @@ export function useSystemAudio() {
       const conversationId = generateConversationId("sysaudio");
       speechQueueRef.current = [];
       speechSegmentCounterRef.current = 0;
+      pendingTranscriptRef.current = "";
+      if (audioAiDebounceRef.current) {
+        clearTimeout(audioAiDebounceRef.current);
+        audioAiDebounceRef.current = null;
+      }
       setConversation({
         id: conversationId,
         title: "",
@@ -782,6 +908,12 @@ export function useSystemAudio() {
 
       // Reset ALL states
       speechQueueRef.current = [];
+      pendingTranscriptRef.current = "";
+      if (audioAiDebounceRef.current) {
+        clearTimeout(audioAiDebounceRef.current);
+        audioAiDebounceRef.current = null;
+      }
+      isAIProcessingRef.current = false;
       setCapturing(false);
       setIsProcessing(false);
       setIsAIProcessing(false);
@@ -878,6 +1010,10 @@ export function useSystemAudio() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      if (audioAiDebounceRef.current) {
+        clearTimeout(audioAiDebounceRef.current);
+        audioAiDebounceRef.current = null;
+      }
       invoke("stop_system_audio_capture").catch(() => {});
     };
   }, []);
@@ -931,6 +1067,11 @@ export function useSystemAudio() {
   const startNewConversation = useCallback(() => {
     speechQueueRef.current = [];
     speechSegmentCounterRef.current = 0;
+    pendingTranscriptRef.current = "";
+    if (audioAiDebounceRef.current) {
+      clearTimeout(audioAiDebounceRef.current);
+      audioAiDebounceRef.current = null;
+    }
     setConversation({
       id: generateConversationId("sysaudio"),
       title: "",
