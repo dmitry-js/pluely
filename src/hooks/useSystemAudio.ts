@@ -48,6 +48,7 @@ const DEFAULT_VAD_CONFIG: VadConfig = {
 
 const STT_TIMEOUT_MS = 60000;
 const AUDIO_AI_DEBOUNCE_MS = 2000;
+const PAUSE_GRACE_MS = 2500;
 const SYSTEM_AUDIO_SETTINGS_CHANGED_EVENT = "system-audio-settings-changed";
 const MANUAL_AUDIO_ANSWER_EVENT = "manual-audio-answer-request";
 
@@ -106,6 +107,7 @@ export function useSystemAudio() {
   const [capturing, setCapturing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAIProcessing, setIsAIProcessing] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [lastTranscription, setLastTranscription] = useState<string>("");
   const [lastAIResponse, setLastAIResponse] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -155,6 +157,8 @@ export function useSystemAudio() {
     null
   );
   const isAIProcessingRef = useRef<boolean>(false);
+  const isPausedRef = useRef<boolean>(false);
+  const pausedAtRef = useRef<number | null>(null);
   const autoGenerateAudioAnswersRef = useRef<boolean>(false);
   const flushPendingTranscriptRef = useRef<() => Promise<void>>(async () => {});
   const scheduleAudioAIResponseRef = useRef<(reason?: string) => void>(
@@ -319,6 +323,31 @@ export function useSystemAudio() {
             for (let i = 0; i < binaryString.length; i++) {
               bytes[i] = binaryString.charCodeAt(i);
             }
+
+            if (isPausedRef.current) {
+              const msSincePaused =
+                pausedAtRef.current === null
+                  ? null
+                  : Date.now() - pausedAtRef.current;
+              const isWithinPauseGrace =
+                msSincePaused !== null && msSincePaused <= PAUSE_GRACE_MS;
+
+              if (!isWithinPauseGrace) {
+                console.debug("[stt] skipped (paused)", {
+                  audioBytes: bytes.length,
+                  queueLength: speechQueueRef.current.length,
+                  msSincePaused,
+                });
+                return;
+              }
+
+              console.debug("[stt] accepted during pause grace", {
+                audioBytes: bytes.length,
+                queueLength: speechQueueRef.current.length,
+                msSincePaused,
+              });
+            }
+
             const audioBlob = new Blob([bytes], { type: "audio/wav" });
 
             const segment: QueuedSpeechSegment = {
@@ -938,6 +967,21 @@ export function useSystemAudio() {
     void processSpeechQueue();
   };
 
+  const togglePause = useCallback(() => {
+    setIsPaused((current) => {
+      const next = !current;
+      isPausedRef.current = next;
+      pausedAtRef.current = next ? Date.now() : null;
+
+      if (next && audioAiDebounceRef.current) {
+        clearTimeout(audioAiDebounceRef.current);
+        audioAiDebounceRef.current = null;
+      }
+
+      return next;
+    });
+  }, []);
+
   const startCapture = useCallback(async () => {
     try {
       setError("");
@@ -956,6 +1000,8 @@ export function useSystemAudio() {
       speechQueueRef.current = [];
       speechSegmentCounterRef.current = 0;
       pendingTranscriptRef.current = "";
+      isPausedRef.current = false;
+      pausedAtRef.current = null;
       if (audioAiDebounceRef.current) {
         clearTimeout(audioAiDebounceRef.current);
         audioAiDebounceRef.current = null;
@@ -969,6 +1015,7 @@ export function useSystemAudio() {
       });
 
       setCapturing(true);
+      setIsPaused(false);
       setIsPopoverOpen(true);
       setIsContinuousMode(isContinuous);
       setRecordingProgress(0);
@@ -1019,7 +1066,10 @@ export function useSystemAudio() {
         audioAiDebounceRef.current = null;
       }
       isAIProcessingRef.current = false;
+      isPausedRef.current = false;
+      pausedAtRef.current = null;
       setCapturing(false);
+      setIsPaused(false);
       setIsProcessing(false);
       setIsAIProcessing(false);
       setIsContinuousMode(false);
@@ -1115,6 +1165,8 @@ export function useSystemAudio() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      isPausedRef.current = false;
+      pausedAtRef.current = null;
       if (audioAiDebounceRef.current) {
         clearTimeout(audioAiDebounceRef.current);
         audioAiDebounceRef.current = null;
@@ -1173,6 +1225,8 @@ export function useSystemAudio() {
     speechQueueRef.current = [];
     speechSegmentCounterRef.current = 0;
     pendingTranscriptRef.current = "";
+    isPausedRef.current = false;
+    pausedAtRef.current = null;
     if (audioAiDebounceRef.current) {
       clearTimeout(audioAiDebounceRef.current);
       audioAiDebounceRef.current = null;
@@ -1188,6 +1242,7 @@ export function useSystemAudio() {
     setLastAIResponse("");
     setError("");
     setSetupRequired(false);
+    setIsPaused(false);
     setIsProcessing(false);
     setIsAIProcessing(false);
     setIsPopoverOpen(false);
@@ -1295,12 +1350,14 @@ export function useSystemAudio() {
     capturing,
     isProcessing,
     isAIProcessing,
+    isPaused,
     lastTranscription,
     lastAIResponse,
     error,
     setupRequired,
     startCapture,
     stopCapture,
+    togglePause,
     handleSetup,
     isPopoverOpen,
     setIsPopoverOpen,

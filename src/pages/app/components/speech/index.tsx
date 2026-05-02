@@ -10,9 +10,11 @@ import {
   HeadphonesIcon,
   AlertCircleIcon,
   LoaderIcon,
-  AudioLinesIcon,
   CameraIcon,
+  PauseIcon,
+  PlayIcon,
   PlusIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -32,12 +34,14 @@ export const SystemAudio = (props: useSystemAudioType) => {
     capturing,
     isProcessing,
     isAIProcessing,
+    isPaused,
     lastTranscription,
     lastAIResponse,
     error,
     setupRequired,
     startCapture,
     stopCapture,
+    togglePause,
     isPopoverOpen,
     setIsPopoverOpen,
     useSystemPrompt,
@@ -103,11 +107,12 @@ export const SystemAudio = (props: useSystemAudioType) => {
   }, [isProcessing, screenshotImage]);
 
   const handleToggleCapture = async () => {
-    if (capturing) {
-      await stopCapture();
-    } else {
+    if (!capturing) {
       await startCapture();
+      return;
     }
+
+    togglePause();
   };
 
   const handleModeChange = (vadEnabled: boolean) => {
@@ -158,19 +163,21 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
   const getButtonIcon = () => {
     if (setupRequired) return <AlertCircleIcon className="text-orange-500" />;
+    if (capturing && isPaused) return <PlayIcon className="text-amber-500" />;
+    if (capturing)
+      return <PauseIcon className="text-green-500 animate-pulse" />;
     if (error && !setupRequired)
       return <AlertCircleIcon className="text-red-500" />;
     if (isProcessing) return <LoaderIcon className="animate-spin" />;
-    if (capturing)
-      return <AudioLinesIcon className="text-green-500 animate-pulse" />;
     return <HeadphonesIcon />;
   };
 
   const getButtonTitle = () => {
     if (setupRequired) return "Setup required - Click for instructions";
+    if (capturing && isPaused) return "Resume system audio capture";
+    if (capturing) return "Pause system audio capture";
     if (error && !setupRequired) return `Error: ${error}`;
     if (isProcessing) return "Transcribing audio...";
-    if (capturing) return "Stop system audio capture";
     return "Start system audio capture";
   };
 
@@ -184,19 +191,35 @@ export const SystemAudio = (props: useSystemAudioType) => {
         setIsPopoverOpen(open);
       }}
     >
-      <PopoverTrigger asChild>
-        <Button
-          size="icon"
-          title={getButtonTitle()}
-          onClick={handleToggleCapture}
-          className={cn(
-            capturing && "bg-green-50 hover:bg-green-100",
-            error && "bg-red-100 hover:bg-red-200"
-          )}
-        >
-          {getButtonIcon()}
-        </Button>
-      </PopoverTrigger>
+      <div className="flex items-center gap-1">
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            title={getButtonTitle()}
+            onClick={handleToggleCapture}
+            className={cn(
+              capturing &&
+                !isPaused &&
+                "bg-green-50 hover:bg-green-100",
+              capturing && isPaused && "bg-amber-50 hover:bg-amber-100",
+              error && !capturing && "bg-red-100 hover:bg-red-200"
+            )}
+          >
+            {getButtonIcon()}
+          </Button>
+        </PopoverTrigger>
+
+        {!setupRequired && capturing && (
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={stopCapture}
+            title="Stop system audio capture"
+          >
+            <SquareIcon className="w-4 h-4" />
+          </Button>
+        )}
+      </div>
 
       {(capturing || setupRequired || error) && (
         <PopoverContent
@@ -313,13 +336,37 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
                 {/* Error Display */}
                 {error && !setupRequired && (
-                  <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
-                    <AlertCircleIcon className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div
+                    className={cn(
+                      "flex items-start gap-2 p-2.5 rounded-lg border",
+                      capturing
+                        ? "bg-amber-50 border-amber-200"
+                        : "bg-red-50 border-red-200"
+                    )}
+                  >
+                    <AlertCircleIcon
+                      className={cn(
+                        "w-3.5 h-3.5 flex-shrink-0 mt-0.5",
+                        capturing ? "text-amber-500" : "text-red-500"
+                      )}
+                    />
                     <div>
-                      <p className="text-[10px] font-medium text-red-800">
-                        Error
+                      <p
+                        className={cn(
+                          "text-[10px] font-medium",
+                          capturing ? "text-amber-800" : "text-red-800"
+                        )}
+                      >
+                        {capturing ? "Warning" : "Error"}
                       </p>
-                      <p className="text-[10px] text-red-700">{error}</p>
+                      <p
+                        className={cn(
+                          "text-[10px]",
+                          capturing ? "text-amber-700" : "text-red-700"
+                        )}
+                      >
+                        {error}
+                      </p>
                     </div>
                   </div>
                 )}
