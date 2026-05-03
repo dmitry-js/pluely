@@ -42,19 +42,12 @@ fn has_code_intent(message: &str) -> bool {
 
     // Obvious code markers.
     let code_markers = [
-        "```",
-        "`",
-        "import",
-        "export",
-        "function",
-        "const",
-        "let",
-        "=>",
-        ".tsx",
-        ".ts",
-        ".js",
+        "```", "`", "import", "export", "function", "const", "let", "=>", ".tsx", ".ts", ".js",
     ];
-    if code_markers.iter().any(|marker| normalized.contains(marker)) {
+    if code_markers
+        .iter()
+        .any(|marker| normalized.contains(marker))
+    {
         return true;
     }
 
@@ -252,7 +245,10 @@ pub async fn warmup_openai_connection(app: AppHandle, http_client: reqwest::Clie
         }
         Err(error) => {
             if cfg!(debug_assertions) {
-                eprintln!("[warmup] failed: duration_ms={}, error={}", duration_ms, error);
+                eprintln!(
+                    "[warmup] failed: duration_ms={}, error={}",
+                    duration_ms, error
+                );
             }
         }
     }
@@ -308,7 +304,10 @@ pub async fn clear_openai_api_key(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn get_openai_api_key_status(app: AppHandle) -> bool {
-    get_openai_api_key_from_storage(&app).ok().flatten().is_some()
+    get_openai_api_key_from_storage(&app)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 // Audio API Structs
@@ -899,7 +898,9 @@ fn is_openai_chat_completions_endpoint(url: &str, provider: Option<&str>) -> boo
 
     Url::parse(url)
         .ok()
-        .map(|parsed| parsed.host_str() == Some("api.openai.com") && parsed.path() == "/v1/chat/completions")
+        .map(|parsed| {
+            parsed.host_str() == Some("api.openai.com") && parsed.path() == "/v1/chat/completions"
+        })
         .unwrap_or(false)
 }
 
@@ -1019,7 +1020,10 @@ fn to_openai_responses_input(messages: &[serde_json::Value]) -> Vec<serde_json::
             continue;
         }
 
-        let content = message.get("content").cloned().unwrap_or(serde_json::json!(""));
+        let content = message
+            .get("content")
+            .cloned()
+            .unwrap_or(serde_json::json!(""));
         let mapped_content = if role == "assistant" {
             to_responses_assistant_content(&content)
         } else {
@@ -1046,11 +1050,7 @@ fn extract_stream_text_delta(parsed: &serde_json::Value) -> Option<String> {
         }
     }
 
-    if parsed
-        .get("type")
-        .and_then(|value| value.as_str())
-        == Some("response.output_text.delta")
-    {
+    if parsed.get("type").and_then(|value| value.as_str()) == Some("response.output_text.delta") {
         if let Some(delta) = parsed.get("delta").and_then(|value| value.as_str()) {
             return Some(delta.to_string());
         }
@@ -1131,9 +1131,10 @@ pub async fn chat_stream_response(
     } else {
         // Get stored credentials to get selected model
         let (_, _, selected_model) = get_stored_credentials(&app).await?;
-        let (configured_provider, configured_model) = selected_model
-            .as_ref()
-            .map_or((None, None), |m| (Some(m.provider.clone()), Some(m.model.clone())));
+        let (configured_provider, configured_model) =
+            selected_model.as_ref().map_or((None, None), |m| {
+                (Some(m.provider.clone()), Some(m.model.clone()))
+            });
 
         // Fetch API configuration
         api_config =
@@ -1191,17 +1192,16 @@ pub async fn chat_stream_response(
                 }
 
                 let user_index_set: HashSet<usize> = user_indices.into_iter().collect();
-                let latest_assistant_index = history_messages
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find_map(|(index, message)| {
-                        (message
-                            .get("role")
-                            .and_then(|role| role.as_str())
-                            == Some("assistant"))
-                        .then_some(index)
-                    });
+                let latest_assistant_index =
+                    history_messages
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(index, message)| {
+                            (message.get("role").and_then(|role| role.as_str())
+                                == Some("assistant"))
+                            .then_some(index)
+                        });
 
                 for (index, message) in history_messages.into_iter().enumerate() {
                     if user_index_set.contains(&index) {

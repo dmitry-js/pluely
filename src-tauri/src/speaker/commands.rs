@@ -12,7 +12,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_shell::ShellExt;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
+
+#[cfg(debug_assertions)]
+static DEBUG_SPEECH_SEGMENT_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 // VAD Configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,7 +151,6 @@ async fn run_vad_capture(
     let mut silence_chunks = 0;
     let mut speech_chunks = 0;
     let max_samples = sr as usize * 30; // 30s safety cap per utterance
-
     while let Some(sample) = stream.next().await {
         buffer.push_back(sample);
 
@@ -185,9 +188,10 @@ async fn run_vad_capture(
                 // Safety cap: force emit if exceeds 30s
                 if speech_buffer.len() > max_samples {
                     let normalized_buffer = normalize_audio_level(&speech_buffer, 0.1);
+                    let duration_seconds = normalized_buffer.len() as f32 / sr as f32;
                     if let Ok(b64) = samples_to_wav_b64(sr, &normalized_buffer) {
                         // let duration = speech_buffer.len() as f32 / sr as f32;
-                        let _ = app.emit("speech-detected", b64);
+                        emit_speech_detected(&app, b64, duration_seconds);
                     }
                     speech_buffer.clear();
                     in_speech = false;
@@ -217,9 +221,10 @@ async fn run_vad_capture(
 
                             // Emit complete speech segment
                             let normalized_buffer = normalize_audio_level(&speech_buffer, 0.1);
+                            let duration_seconds = normalized_buffer.len() as f32 / sr as f32;
                             if let Ok(b64) = samples_to_wav_b64(sr, &normalized_buffer) {
                                 // let duration = speech_buffer.len() as f32 / sr as f32;
-                                let _ = app.emit("speech-detected", b64);
+                                emit_speech_detected(&app, b64, duration_seconds);
                             } else {
                                 error!("Failed to encode speech to WAV");
                                 let _ = app.emit("audio-encoding-error", "Failed to encode speech");
@@ -344,7 +349,7 @@ async fn run_continuous_capture(
 
         match samples_to_wav_b64(sr, &cleaned_audio) {
             Ok(b64) => {
-                let _ = app.emit("speech-detected", b64);
+                emit_speech_detected(&app, b64, cleaned_audio.len() as f32 / sr as f32);
             }
             Err(e) => {
                 error!("Failed to encode continuous audio: {}", e);
@@ -358,6 +363,60 @@ async fn run_continuous_capture(
 
     let _ = app.emit("continuous-recording-stopped", ());
 }
+
+fn emit_speech_detected(app: &AppHandle, b64: String, duration_seconds: f32) {
+    save_debug_speech_segment(&b64, duration_seconds);
+    let _ = app.emit("speech-detected", b64);
+}
+
+#[cfg(debug_assertions)]
+fn save_debug_speech_segment(b64: &str, duration_seconds: f32) {
+    let enabled = std::env::var("PLUELY_SAVE_STT_SEGMENTS")
+        .map(|value| matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+
+    if !enabled {
+        return;
+    }
+
+    let segment_id = DEBUG_SPEECH_SEGMENT_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let duration_ms = (duration_seconds * 1000.0).round() as u64;
+    let dir = std::env::temp_dir().join("pluely-stt-segments");
+    let file_name = format!("segment-{segment_id:05}-{duration_ms}ms-{timestamp_ms}.wav");
+    let path = dir.join(file_name);
+
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        debug!("[stt-debug] failed to create speech segment dir: {}", error);
+        return;
+    }
+
+    match B64.decode(b64) {
+        Ok(bytes) => match std::fs::write(&path, &bytes) {
+            Ok(()) => {
+                debug!(
+                    "[stt-debug] saved speech segment path={} segment_id={} duration_seconds={:.3} bytes={}",
+                    path.display(),
+                    segment_id,
+                    duration_seconds,
+                    bytes.len()
+                );
+            }
+            Err(error) => {
+                debug!("[stt-debug] failed to save speech segment: {}", error);
+            }
+        },
+        Err(error) => {
+            debug!("[stt-debug] failed to decode speech segment: {}", error);
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn save_debug_speech_segment(_b64: &str, _duration_seconds: f32) {}
 
 // Apply noise gate
 fn apply_noise_gate(samples: &[f32], threshold: f32) -> Vec<f32> {

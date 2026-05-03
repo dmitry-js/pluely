@@ -292,7 +292,8 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                     window_position_state.set((position.x, position.y));
                     shortcut_log!(
                         "toggle_window: stored position before hide = ({}, {})",
-                        position.x, position.y
+                        position.x,
+                        position.y
                     );
                 }
                 Err(e) => shortcut_log!("toggle_window: failed to get position before hide: {}", e),
@@ -305,11 +306,14 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
             }
 
             if let Some((x, y)) = window_position_state.get() {
-                match window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                    x,
-                    y,
-                })) {
-                    Ok(_) => shortcut_log!("toggle_window: restored position after show = ({}, {})", x, y),
+                match window
+                    .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+                {
+                    Ok(_) => shortcut_log!(
+                        "toggle_window: restored position after show = ({}, {})",
+                        x,
+                        y
+                    ),
                     Err(e) => shortcut_log!("toggle_window: failed to restore position: {}", e),
                 }
             }
@@ -317,7 +321,9 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
             if always_on_top_enabled {
                 match window.set_always_on_top(true) {
                     Ok(_) => shortcut_log!("toggle_window: re-applied always-on-top successfully"),
-                    Err(e) => shortcut_log!("toggle_window: failed to re-apply always-on-top: {}", e),
+                    Err(e) => {
+                        shortcut_log!("toggle_window: failed to re-apply always-on-top: {}", e)
+                    }
                 }
             }
 
@@ -340,7 +346,8 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
                     window_position_state.set((position.x, position.y));
                     shortcut_log!(
                         "toggle_window: stored position before hide = ({}, {})",
-                        position.x, position.y
+                        position.x,
+                        position.y
                     );
                 }
                 Err(e) => shortcut_log!("toggle_window: failed to get position before hide: {}", e),
@@ -364,11 +371,14 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
             }
 
             if let Some((x, y)) = window_position_state.get() {
-                match window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                    x,
-                    y,
-                })) {
-                    Ok(_) => shortcut_log!("toggle_window: restored position after show = ({}, {})", x, y),
+                match window
+                    .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+                {
+                    Ok(_) => shortcut_log!(
+                        "toggle_window: restored position after show = ({}, {})",
+                        x,
+                        y
+                    ),
                     Err(e) => shortcut_log!("toggle_window: failed to restore position: {}", e),
                 }
             }
@@ -376,7 +386,9 @@ fn handle_toggle_window<R: Runtime>(app: &AppHandle<R>) {
             if always_on_top_enabled {
                 match window.set_always_on_top(true) {
                     Ok(_) => shortcut_log!("toggle_window: re-applied always-on-top successfully"),
-                    Err(e) => shortcut_log!("toggle_window: failed to re-apply always-on-top: {}", e),
+                    Err(e) => {
+                        shortcut_log!("toggle_window: failed to re-apply always-on-top: {}", e)
+                    }
                 }
             }
 
@@ -402,7 +414,7 @@ fn handle_audio_shortcut<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(not(target_os = "macos"))]
         {
-        // Ensure window is visible
+            // Ensure window is visible
             if let Ok(false) = window.is_visible() {
                 if let Err(_e) = window.show() {
                     return;
@@ -451,7 +463,7 @@ fn handle_system_audio_shortcut<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(not(target_os = "macos"))]
         {
-        // Ensure window is visible
+            // Ensure window is visible
             if let Ok(false) = window.is_visible() {
                 if let Err(e) = window.show() {
                     shortcut_log!("Failed to show window: {}", e);
@@ -542,7 +554,9 @@ pub fn update_shortcuts<R: Runtime>(
                 Err(e) => {
                     shortcut_log!(
                         "Invalid shortcut '{}' for action '{}': {}",
-                        binding.key, action_id, e
+                        binding.key,
+                        action_id,
+                        e
                     );
                     return Err(format!(
                         "Invalid shortcut '{}' for action '{}': {}",

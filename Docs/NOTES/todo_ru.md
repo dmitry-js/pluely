@@ -25,3 +25,9 @@
 - [ ] Прогнать screenshot-flow smoke-test после window stabilization.
   - Приёмка: `visible -> capture -> restore` и `hidden -> capture -> stay hidden` проходят без регрессий.
   - Приёмка: overlay не попадает в screenshot и окно возвращается в ожидаемое состояние.
+
+- [ ] Вернуться к backend-level pause/flush для system audio как отдельному исследованию.
+  - Текущее поведение: Pause реализован на frontend как gate для `speech-detected` с grace window `PAUSE_GRACE_MS = 2500`; STT queue и ручной `Cmd+Enter` flow остаются без изменений.
+  - Важно: backend VAD во время Pause продолжает захватывать аудио и может эмитить сегменты; frontend решает, принять их через grace window или пропустить.
+  - Контекст: прототип `flush_system_audio_segment` не оставлен, потому что практическая польза была неочевидна, а сложность VAD state machine росла.
+  - Приёмка будущего решения: понятные метрики улучшения tail capture, отсутствие лишних коротких/hallucination-prone сегментов и минимальное усложнение VAD.
