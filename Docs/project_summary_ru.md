@@ -9,6 +9,8 @@
 - Screenshot-mode выделен в отдельный stateless AI-path: история не передаётся, изображения становятся основным контекстом, а prompt идёт отдельным `system_prompt`.
 - Runtime toggle passive/interactive mode на macOS временно заморожен: приоритет смещён в сторону стабильности окна и UX-консистентности.
 - Стартовый passive mode можно отключить переменной окружения `PLUELY_PASSIVE_DEFAULT=false` для разработки; поведение без переменной окружения остаётся прежним.
+- System audio Pause реализован как frontend gate: backend продолжает audio capture и VAD-сегментацию, а frontend решает, принимать ли сегменты в STT pipeline.
+- Для dev-диагностики STT можно включить сохранение emitted VAD WAV-сегментов через `PLUELY_SAVE_STT_SEGMENTS=true npm run tauri dev`; в обычном режиме файлы не пишутся.
 
 ## Что обновлено в текущем цикле
 - Вынесен общий screenshot-pipeline в `src/lib/screenshot/`: константы, builder запроса и shared helper захвата без overlay:
@@ -118,6 +120,16 @@
 - Текущая prompt-логика уже фиксирует stateless screenshot-mode и multi-screenshot context hint.
 - Более строгие правила уровня «игнорировать UI-шум», «трактовать комментарии как часть спецификации» и interview-style fallback для async/event loop задач пока нужно валидировать отдельно; они не зафиксированы в коде как гарантированный общий prompt-layer.
 
+### STT debug WAV dumps
+- Для диагностики можно включить сохранение VAD/STT WAV-сегментов:
+  `PLUELY_SAVE_STT_SEGMENTS=true npm run tauri dev`.
+- На macOS файлы пишутся в системную temp-директорию, например:
+  `/var/folders/.../T/pluely-stt-segments/`.
+- Точный путь выводится в логах как:
+  `[stt-debug] saved speech segment path=...`.
+- Важно: Pause не останавливает backend audio capture/VAD, поэтому при включённом `PLUELY_SAVE_STT_SEGMENTS` WAV-файлы могут продолжать сохраняться даже во время Pause.
+- Это dev-only диагностика; не использовать постоянно для длинных сессий и периодически удалять папку `pluely-stt-segments`.
+
 ## Известные ограничения/заметки
 - Основная логика screenshot capture централизована, но требует ручной QA на разных Linux WM/композиторах.
 - Fallback-capture при скрытии overlay снижает риск пустого кадра, но может зависеть от таймингов окружения.
@@ -129,6 +141,9 @@
 - Override через `PLUELY_PASSIVE_DEFAULT=false` нужен только для удобства dev-запуска (`npm run tauri dev`) и не возвращает переключение passive mode во время работы.
 - Native opacity на macOS теперь стабилен в обычном runtime path; следующая зона риска — window/panel lifecycle при show/hide и других hotkey flow.
 - На macOS остаётся follow-up на более мягкий `refocus input` behavior без ощущения жёсткого app-switch; это polish-задача, не текущий блокер.
+- Текущий direct desktop client -> OpenAI STT path нестабилен для пользователей за VPN/restricted network: возможны обрывы соединения, timeout/connect/send ошибки и непредсказуемая доступность.
+- Высокий приоритет: минимальный STT proxy backend, где клиент отправляет audio в backend Pluely, а backend проксирует STT provider с timeout/retry и нормализованными ошибками.
+- Прототип backend VAD flush для Pause не сохранён: польза была неочевидна, а сложность VAD state machine росла.
 
 ## Ограничения
 - Качество screenshot-анализа зависит от читаемости изображения, масштаба, контраста и плотности текста.
@@ -137,6 +152,7 @@
 - Edge-case задачи по `async`/event loop/microtasks/macrotasks требуют отдельной ручной проверки; интерпретация таких screenshots может быть неидеальной.
 
 ## TODO/вопросы
+- Реализовать минимальный STT proxy backend (v1) для устойчивого STT path без прямой зависимости пользователя от доступа к OpenAI STT.
 - Проверить screenshot-flow в сценариях visible/hidden/manual/auto на Linux и macOS (TODO).
 - Подтвердить, что screenshot coding tasks в `short` теперь дают полный код без обрывов.
 - Отдельно валидировать richer screenshot prompt-policy для interview-style задач; пока она не зафиксирована как универсальный hardcoded слой.

@@ -1,3 +1,16 @@
+## 2026-05-03
+- Ключевые пункты: Pause/Resume для system audio оставлен как frontend gate с `PAUSE_GRACE_MS = 2500`; backend audio capture/VAD продолжает захват и сегментацию.
+- Ключевые пункты: прототип backend flush (`flush_system_audio_segment`) не сохранён из-за неочевидной пользы и роста сложности VAD state machine.
+- Ключевые пункты: STT queue, pending transcript buffer и ручной `Cmd+Enter` flow остаются текущей базовой моделью interview audio.
+- Ключевые пункты: `PLUELY_SAVE_STT_SEGMENTS` сохраняет emitted VAD WAV-сегменты на Rust-стороне только в debug/dev режиме.
+- Ключевые пункты: STT proxy backend выделен как high priority, потому что direct desktop client -> OpenAI STT path нестабилен за VPN/restricted network.
+- Ключевые пункты: наблюдение — transcript truncation чаще связан с VAD segmentation/chunk boundaries, а не с STT provider напрямую.
+- Риски/вопросы: нужно вручную сравнить сохранённые WAV-сегменты с transcript, чтобы отличать VAD truncation от Whisper hallucination.
+- Риски/вопросы: прямой STT path остаётся чувствительным к timeout/connect/send ошибкам на машине пользователя.
+- Следующие шаги: спроектировать минимальный STT proxy backend v1 с timeout/retry и нормализованными ошибками.
+- Следующие шаги: проверить STT WAV dumps на реальных interview-фразах и периодически чистить временную папку `pluely-stt-segments`.
+- Следующие шаги: не добавлять новые pause timing heuristics без измеримого улучшения на сохранённых сегментах.
+
 ## 2026-02-24
 - Ключевые пункты: OpenAI переведён на backend-only путь через `chat_stream_response`; browser `fetch` для OpenAI исключён.
 - Ключевые пункты: добавлены backend-команды хранения OpenAI API key и статус/очистка в UI настроек.

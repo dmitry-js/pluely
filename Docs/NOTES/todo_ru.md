@@ -1,22 +1,22 @@
-- [x] Стабилизировать native `opacity` на macOS.
-  - Приёмка: изменение opacity больше не приводит к crash в settings slider.
-  - Приёмка: runtime update использует существующий panel без повторного `to_panel()`.
+- [ ] Реализовать минимальный STT proxy backend (v1).
+  - Приёмка: HTTP endpoint принимает audio (`multipart` или `base64`), проксирует в OpenAI Whisper или другой STT provider и возвращает transcript + нормализованные ошибки.
+  - Приёмка: retry работает для network errors (`timeout/connect/send`), а overhead latency не превышает примерно +300–500ms к прямому вызову.
+
+- [ ] Проверить STT WAV debug dump на реальных interview-сегментах.
+  - Приёмка: по файлам из `PLUELY_SAVE_STT_SEGMENTS=true npm run tauri dev` понятно, где проблема: VAD segmentation, Pause gate или STT hallucination.
+  - Приёмка: после длинных dev-сессий временная папка `pluely-stt-segments` удаляется вручную.
+
+- [ ] Вернуться к backend-level pause/flush для system audio только как отдельному исследованию.
+  - Приёмка: есть измеримые метрики улучшения tail capture и нет лишних коротких hallucination-prone сегментов.
+  - Приёмка: решение не усложняет VAD state machine без доказанной пользы.
 
 - [ ] Harden macOS window lifecycle (`opacity` + panel state).
   - Приёмка: проверки проходят для hide/show и быстрых изменений состояния окна.
   - Приёмка: нет регрессий при повторных runtime update и в нестандартных panel state.
 
-- [ ] Отполировать keyboard-first window behavior на macOS.
-  - Приёмка: `refocus input box` возвращает ввод без ощущения жёсткого app switch / лишнего stealing focus.
-  - Приёмка: keyboard-only сценарии overlay (`Esc`, `toggle_response_panel`, scroll response, refocus input) проходят без заметных UX-регрессий.
-
 - [ ] Подготовить panel-safe стратегию возврата passive mode на macOS.
   - Приёмка: есть краткая заметка с выбранным подходом и списком API/ограничений.
   - Приёмка: решение не опирается на небезопасный runtime toggle через текущий lifecycle окна.
-
-- [ ] Восстановить passive mode на macOS после стабилизации окна.
-  - Приёмка: runtime toggle работает без crash в `Cmd+Shift+P`.
-  - Приёмка: UI overlay и settings снова честно отражают доступность функции.
 
 - [ ] Вернуть управляемую диагностику hotkeys/window behavior.
   - Приёмка: shortcut/window debug можно включать без лишнего шума по умолчанию.
@@ -25,9 +25,3 @@
 - [ ] Прогнать screenshot-flow smoke-test после window stabilization.
   - Приёмка: `visible -> capture -> restore` и `hidden -> capture -> stay hidden` проходят без регрессий.
   - Приёмка: overlay не попадает в screenshot и окно возвращается в ожидаемое состояние.
-
-- [ ] Вернуться к backend-level pause/flush для system audio как отдельному исследованию.
-  - Текущее поведение: Pause реализован на frontend как gate для `speech-detected` с grace window `PAUSE_GRACE_MS = 2500`; STT queue и ручной `Cmd+Enter` flow остаются без изменений.
-  - Важно: backend VAD во время Pause продолжает захватывать аудио и может эмитить сегменты; frontend решает, принять их через grace window или пропустить.
-  - Контекст: прототип `flush_system_audio_segment` не оставлен, потому что практическая польза была неочевидна, а сложность VAD state machine росла.
-  - Приёмка будущего решения: понятные метрики улучшения tail capture, отсутствие лишних коротких/hallucination-prone сегментов и минимальное усложнение VAD.
